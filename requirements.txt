@@ -1,0 +1,8 @@
+streamlit>=1.40
+optiland>=0.6.1
+numpy>=1.24
+pandas>=1.5
+matplotlib>=3.7
+scipy>=1.10
+# 可选：GA 运行控制需要（Windows + Zemax COM）
+# pywin32>=306

@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Streamlit
+.streamlit/
+
+# 数据（样例留空，用户自己的精英文件不入库）
+data/samples/*
+!data/samples/.gitkeep
+
+# 运行时产物
+*.log
+.panel_running
+.DS_Store
+Thumbs.db

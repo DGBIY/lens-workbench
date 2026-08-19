@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>镜头设计工作台 v0.14 — UI 使用教程</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #e6edf3; --dim: #8b949e; --accent: #58a6ff; --accent2: #bc8cff;
+    --ok: #3fb950; --warn: #d29922; --err: #f85149;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif; line-height: 1.7; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 24px 20px 80px; }
+
+  /* 顶部导航 */
+  nav { position: sticky; top: 0; z-index: 50; background: rgba(13,17,23,.92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
+  nav .inner { max-width: 1080px; margin: 0 auto; padding: 10px 20px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  nav a { color: var(--dim); text-decoration: none; font-size: 13px; padding: 3px 10px; border-radius: 20px; border: 1px solid transparent; transition: .2s; }
+  nav a:hover { color: var(--text); border-color: var(--border); background: var(--card); }
+  nav .brand { color: var(--accent); font-weight: 700; margin-right: 8px; }
+
+  /* 封面 */
+  header.hero { text-align: center; padding: 64px 0 40px; }
+  header.hero h1 { font-size: 34px; background: linear-gradient(90deg, var(--accent), var(--accent2)); -webkit-background-clip: text; background-clip: text; color: transparent; letter-spacing: 1px; }
+  header.hero p { color: var(--dim); margin-top: 12px; font-size: 15px; }
+  header.hero .meta { margin-top: 18px; font-size: 13px; color: var(--dim); }
+  header.hero .meta span { display: inline-block; background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 2px 10px; margin: 0 4px; }
+
+  /* 章节卡片 */
+  section.card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; margin: 26px 0; overflow: hidden; }
+  .card-head { display: flex; align-items: center; gap: 14px; padding: 16px 22px; border-bottom: 1px solid var(--border); background: linear-gradient(135deg, rgba(88,166,255,.08), rgba(188,140,255,.06)); }
+  .card-head .num { flex: 0 0 auto; width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; color: #fff; background: linear-gradient(135deg, var(--accent), var(--accent2)); box-shadow: 0 4px 14px rgba(88,166,255,.35); }
+  .card-head h2 { font-size: 20px; }
+  .card-head .sub { color: var(--dim); font-size: 13px; margin-top: 2px; }
+  .card-body { padding: 20px 22px; }
+  .shot { width: 100%; border-radius: 10px; border: 1px solid var(--border); display: block; margin-bottom: 16px; }
+  .steps { list-style: none; }
+  .steps li { padding: 7px 0 7px 4px; border-bottom: 1px dashed #21262d; font-size: 14.5px; }
+  .steps li:last-child { border-bottom: none; }
+  .steps b { color: var(--accent); font-weight: 600; }
+  .tag { display: inline-block; font-size: 12px; border-radius: 4px; padding: 1px 7px; margin-right: 6px; vertical-align: 1px; }
+  .tag.op { background: rgba(88,166,255,.15); color: var(--accent); }
+  .tag.see { background: rgba(63,185,80,.12); color: var(--ok); }
+  .note { border-left: 3px solid var(--warn); background: rgba(210,153,34,.08); border-radius: 0 8px 8px 0; padding: 10px 14px; margin-top: 14px; font-size: 13.5px; color: #d8c9a3; }
+  .note.ok { border-left-color: var(--ok); background: rgba(63,185,80,.07); color: #a5d6b1; }
+  .note.info { border-left-color: var(--accent); background: rgba(88,166,255,.07); color: #a8c8ef; }
+  .legend { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 12px; font-size: 13px; color: var(--dim); }
+  .legend i { width: 12px; height: 12px; display: inline-block; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+
+  footer { text-align: center; color: var(--dim); font-size: 13px; padding-top: 30px; border-top: 1px solid var(--border); margin-top: 40px; }
+  @media (max-width: 720px) { header.hero h1 { font-size: 24px; } .card-body { padding: 14px; } }
+</style>
+</head>
+<body>
+
+<nav><div class="inner">
+  <span class="brand">🔭 镜头设计工作台</span>
+  <a href="#c01">01 主界面</a><a href="#c02">02 系统页</a><a href="#c03">03 运行页</a>
+  <a href="#c04">04 设计 LDE</a><a href="#c05">05 玻璃库</a><a href="#c06">06 对比</a>
+  <a href="#c07">07 3D</a><a href="#c08">08 Spot</a><a href="#c09">09 像差</a>
+  <a href="#c10">10 轴向色差</a><a href="#c11">11 优化</a><a href="#c12">12 状态栏</a>
+</div></nav>
+
+<div class="wrap">
+
+<header class="hero">
+  <h1>镜头设计工作台 v0.14 · UI 使用教程</h1>
+  <p>12 屏带你走完所有界面——真实截图 + 每步操作 + 要点提示</p>
+  <div class="meta">
+    <span>基于 Streamlit + optiland</span>
+    <span>无需 Zemax</span>
+    <span>启动：streamlit run app.py</span>
+  </div>
+</header>
+
+<!-- ============ 01 主界面 ============ -->
+<section class="card" id="c01">
+  <div class="card-head"><div class="num">01</div><div>
+    <h2>启动与主界面总览</h2>
+    <div class="sub">数据页 · 指标行 · 工作区 tabs</div>
+  </div></div>
+  <div class="card-body">
+    <img class="shot" src="shots/01_主界面.png" alt="主界面">
+    <ul class="steps">
+      <li><span class="tag op">🖱 操作</span>在项目目录执行 <b>streamlit run app.py</b>，浏览器自动打开 http://localhost:8501</li>
+      <li><span class="tag op">🖱 操作</span>启动即自动载入默认结构（本图：run_20260818_213729/ga_elite.txt #55），顶部标签显示 <b>EPD 40mm | 主波长λ1 | 18 面</b></li>
+      <li><span class="tag see">🔍 看到</span><b>指标 6 卡</b>＝当前镜头的"体检报告"：近轴 EFFL 200.1mm、AXCL +0.086mm、总长 208.6mm、RSCE 474µm、F/# 0.20、后焦 BFL 55.0mm</li>
+      <li><span class="tag see">🔍 看到</span>主区域 3 个 tab：<b>🛠 设计</b>（核心工作区）/ <b>📊 多精英对比</b> / <b>📈 GA 收敛 + 运行</b></li>
+      <li><span class="tag see">🔍 看到</span>左侧"集成中心"＝功能区导航（📂 数据 / ⚙️ 系统 / 🚀 运行 / 🛠 设计），下方是画布管理和光阑设置</li>
+    </ul>
+    <div class="note info">💡 指标行随时刷新——你在 LDE 里改任何一个数字，回车后所有指标立即重算。改前先记住这里的"初始体检值"，优化效果好坏一目了然。</div>
+  </div>
+</section>
+
+<!-- ============ 02 系统页 ============ -->
+<section class="card" id="c02">
+  <div class="card-head"><div class="num">02</div><div>
+    <h2>⚙️ 系统页：口径 / 后焦 / 波长</h2>
+    <div class="sub">侧边栏 → 系统</div>
+  </div></div>
+  <div class="card-body">
+    <img class="shot" src="shots/03_系统页.png" alt="系统页">
+    <ul class="steps">
+      <li><span class="tag op">🖱 操作</span>侧边栏点 <b>⚙️ 系统</b>，出现系统参数区</li>
+      <li><span class="tag op">🖱 操作</span><b>EPD（入瞳直径）</b>滑块：40mm（对应 F/5 @200mm）；拖到 58mm 可预览大光圈效果</li>
+      <li><span class="tag op">🖱 操作</span><b>后焦 BFL</b> 输入：55mm（法兰距）；勾选<b>无穷远物距</b>＝深空目标；取消勾选后可输入有限物距（mm）</li>
+      <li><span class="tag op">🖱 操作</span><b>波长</b>区：λ1=486.13nm（F 蓝）/ λ2=587.56nm（d 绿）/ λ3=656.27nm（C 红），可直接改值；主波长下拉选择用于艾里斑等计算</li>
+    </ul>
+    <div class="note">⚠️ 改动即生效：所有分析图自动重算（带缓存，切回时即时显示）。大幅改口径后注意观察指标行的 F/# 和 RSCE 变化。</div>
+  </div>
+</section>
+
+<!-- ============ 03 运行页 ============ -->
+<section class="card" id="c03">
+  <div class="card-head"><div class="num">03</div><div>
+    <h2>🚀 运行页：GA 任务控制（可选）</h2>
+    <div class="sub">侧边栏 → 运行 · 需要 GA 完整项目环境</div>
+  </div></div>
+  <div class="card-body">
+    <img class="shot" src="shots/04_运行页.png" alt="运行页">
+    <ul class="steps">
+      <li><span class="tag op">🖱 操作</span>侧边栏点 <b>🚀 运行</b> → <b>任务控制</b>展开区：选任务（三层漏斗流水线 / 完整流水线 / 解码 / 精修优化 / 场曲精修 / 色差精修 / Zemax 验证 / 可视化 PNG）</li>
+      <li><span class="tag op">🖱 操作</span>填任务参数（如流水线的 quick 代数）→ <b>▶ 启动</b>；随时 <b>⏹ 停止</b></li>
+      <li><span class="tag see">🔍 看到</span><b>运行状态</b>：PID + 锁状态（同一时间只跑一个任务）；<b>收敛曲线</b>：自动读 ga_history.csv 实时绘制；<b>任务日志尾部</b>：看最近输出</li>
+    </ul>
+    <div class="note">⚠️ 可选功能：未配置环境变量 GA_PROJECT_ROOT 时此页只显示提示，不影响其他功能。设置方法见项目内《使用说明.md》12.2 节。Zemax 验证任务会启动 OpticStudio COM，请勿与其他 Zemax 任务并发。</div>
+  </div>
+</section>
+
+<!-- ============ 04 设计页 LDE ============ -->
+<section class="card" id="c04">
+  <div class="card-head"><div class="num">04</div><div>
+    <h2>🛠 设计页：LDE 表格（核心工作区）</h2>
+    <div class="sub">侧边栏 → 设计 · 白纸作画 + 视图切换</div>
+  </div></div>
+  <div class="card-body">
+    <img class="shot" src="shots/05_设计页.png" alt="设计页 LDE">
+    <img class="shot" src="shots/04b_库插入.png" alt="从镜片库挑选">
+    <img class="shot" src="shots/04d_2D新版.png" alt="2D Layout 多光线">
+    <ul class="steps">
+      <li><span class="tag op">🖱 操作</span>侧边栏点 <b>🛠 设计</b>，主区域保持 <b>🛠 设计</b> tab（默认）</li>
+      <li><span class="tag op">🖱 操作</span><b>LDE 表格</b>：直接点单元格修改 <b>Radius / Thick / Glass</b>，回车生效；<b>输入玻璃名（如 BAF4）自动带出 AGF 实测 nd/vd</b>（绿色提示"玻璃名自动带出"）</li>
+      <li><span class="tag op">🖱 操作</span><b>添加表面</b>：表格底部"添加行"；<b>删除</b>：勾选行 → 删除按钮（自动避开光阑/物面/像面）</li>
+      <li><span class="tag op">🖱 操作</span><b>添加镜片（手动定义）</b>：插入位置选"面 N 后"→ 选玻璃（81 种自动带出 nd/vd）→ 填 R1/R2/厚度/后空气/半口径 → 点<b>插入镜片</b></li>
+      <li><span class="tag op">🖱 操作</span><b>添加镜片（从镜片库挑选）</b>：来源切"从镜片库挑选"→ 选<b>库类型</b>（1-4 单镜片 / 5-6 双胶合）→ <b>行号</b>（范围自动显示有效区间）→ <b>🔍 实时预览</b>该镜片参数 → 填后空气/半口径 → 点<b>插入库镜片</b>（单镜片插 2 行、双胶合插 3 行）</li>
+      <li><span class="tag see">🔍 看到</span>下图"从镜片库挑选"模式：库1 行 202 = F4 单镜片（R1=-28.9 / R2=54.7 / 厚 1.4），库数据与 GA 精英解码同款</li>
+      <li><span class="tag op">🖱 操作</span>侧边栏 <b>画布管理</b>：✨ 新建空白镜头 / 重置默认；<b>光阑设置</b>：改光阑面号</li>
+      <li><span class="tag see">🔍 看到</span>主区域中部 <b>分析视图</b> 切换按钮：2D Layout / 3D / Spot / 像差分析（下面几张图逐一介绍）</li>
+      <li><span class="tag see">🔍 看到</span><b>2D Layout（v0.16 升级）</b>：每视场 × 每波长 <b>5 条子午真实光线</b>（上/下边缘 + 主光线 + 中间采样，optiland 真实追迹）；镜片浅蓝填充 + <b>面编号</b>（下方灰字）+ <b>光阑 STOP</b> 标记 + 三波长焦点线（轴向色差可视化）</li>
+    </ul>
+    <div class="legend">
+      <span><i style="background:#1f77b4"></i>F 蓝</span>
+      <span><i style="background:#2ca02c"></i>d 绿</span>
+      <span><i style="background:#d62728"></i>C 红</span>
+      <span style="margin-left:auto">面 0=物面 · 面 1=光阑 · 末面=像面</span>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 05 玻璃库 ============ -->
+<section class="card" id="c05">
+  <div class="card-head"><div class="num">05</div><div>
+    <h2>🔬 玻璃库与玻璃搜索</h2>
+    <div class="sub">设计 tab 内 · 81 种 AGF 实测玻璃</div>
+  </div></div>
+  <div class="card-body">
+    <img class="shot" src="shots/06_玻璃页.png" alt="玻璃库">
+    <ul class="steps">
+      <li><span class="tag op">🖱 操作</span>设计 tab 展开 <b>🔬 玻璃库（AGF nd/vd）</b>（默认折叠，点标题展开）</li>
+      <li><span class="tag see">🔍 看到</span>内置 81 种 CDGM/SCHOTT 玻璃目录表（名称 / nd / vd）</li>
+      <li><span class="tag op">🖱 操作</span><b>🔎 玻璃搜索</b>：输入目标 nd（默认 1.5163）+ 目标 vd（64.1）→ 点<b>搜索</b> → 按距离（归一化欧氏）排序的结果表，最近的排最前</li>
+    </ul>
+    <div class="note info">💡 常用操作：想替换某片玻璃时，先搜出目标 nd/vd 附近的候选，再回 LDE 表格直接改玻璃名（nd/vd 自动填充）。</div>
+  </div>
+</section>
+
+<!-- ============ 06 多精英对比 ============ -->
+<section class="card" id="c06">
+  <div class="card-head"><div class="num">06</div><div>
+    <h2>📊 多精英对比：挑候选结构</h2>
+    <div class="sub">主区域 tab → 多精英对比</div>
+  </div></div>
+  <div class="card-body">
+    <img class="shot" src="shots/07_对比页.png" alt="多精英对比">
+    <ul class="steps">
+      <li><span class="tag op">🖱 操作</span>主区域切 <b>📊 多精英对比</b> tab</li>
+      <li><span class="tag op">🖱 操作</span>输入 <b>对比精英文件</b>（默认 run_20260818_213729/ga_elite.txt）+ <b>精英序号</b>（逗号分隔，如 55,1,2）→ 点 <b>载入对比</b></li>
+      <li><span class="tag see">🔍 看到</span>对比表：各精英的 EFFL / AXCL / RSCE / 总长 / 结构差异，方便挑选继续精修的候选</li>
+    </ul>
+    <div class="note">💡 精英序号越小 MFE 越好（1=GA 最优）；对比后可用"📂 数据"页载入对应序号细看。</div>
+  </div>
+</section>
+
+<!-- ============ 07 3D ============ -->
+<section class="card" id="c07">
+  <div class="card-head"><div class="num">07</div><div>
+    <h2>3D 视图：整体结构</h2>
+    <div class="sub">设计 tab → 分析视图 → 3D</div>
+  </div></div>
+  <div class="card-body">
+    <img class="shot" src="shots/08_3D视图.png" alt="3D 视图">
+    <ul class="steps">
+      <li><span class="tag op">🖱 操作</span>设计 tab → 分析视图点 <b>3D</b>（按钮文字就是"3D"）</li>
+      <li><span class="tag see">🔍 看到</span>镜片半透明盘（灰色）+ 线框坐标盒 + Z 轴标注；三波长光线着色</li>
+      <li><span class="tag op">🖱 操作</span>鼠标拖拽旋转视角，检查镜片间距/口径比例是否合理</li>
+    </ul>
+    <div class="note">⚠️ 3D 渲染约 1-3 秒，切换后稍等；若画面还是上一视图，等状态栏转完再操作。</div>
+  </div>
+</section>
+
+<!-- ============ 08 Spot ============ -->
+<section class="card" id="c08">
+  <div class="card-head"><div class="num">08</div><div>
+    <h2>⭕ Spot 点列图：星点质量</h2>
+    <div class="sub">设计 tab → 分析视图 → Spot</div>
+  </div></div>
+  <div class="card-body">
+    <img class="shot" src="shots/09_Spot.png" alt="Spot 点列图">
+    <ul class="steps">
+      <li><span class="tag op">🖱 操作</span>设计 tab → 分析视图点 <b>Spot</b></li>
+      <li><span class="tag see">🔍 看到</span>每视场一个子图：三波长散点（F 蓝 / d 绿 / C 红）+ <b>黑色虚线圆＝艾里斑</b>（1.22λF#，Zemax 同款标注）</li>
+      <li><span class="tag see">🔍 看到</span>下方 RMS 表：视场（norm）/ <b>RMS max（µm）</b> / RMS 主波长——对应指标行的 RSCE（全视场最大）</li>
+    </ul>
+    <div class="note ok">✅ 判断标准：散点越集中越好；全部落在艾里斑圈内 ≈ 接近衍射极限。边缘视场（norm=1，5.8°）RMS 最大，深空镜头重点看这里。</div>
+  </div>
+</section>
+
+<!-- ============ 09 像差分析 ============ -->
+<section class="card" id="c09">
+  <div class="card-head"><div class="num">09</div><div>
+    <h2>📉 像差分析：10 种类型</h2>
+    <div class="sub">设计 tab → 分析视图 → 像差分析 · 选择即自动计算</div>
+  </div></div>
+  <div class="card-body">
+    <img class="shot" src="shots/10_像差分析.png" alt="像差分析">
+    <ul class="steps">
+      <li><span class="tag op">🖱 操作</span>设计 tab → 分析视图点 <b>像差分析</b> → 下拉选类型（<b>选择即出图，无需点按钮</b>）</li>
+      <li><span class="tag see">🔍 看到</span>类型清单：
+        <b>场曲 Field Curvature</b>（子午 T/弧矢 S + 畸变）、<b>畸变 Distortion</b>、<b>光线扇形图 Ray Fan</b>、<b>RMS vs 视场</b>、<b>能量集中度 Encircled Energy</b>、<b>畸变网格 Grid Distortion</b>、<b>透过焦 Spot</b>、<b>透过焦 MTF</b>、<b>RMS 波前误差 vs 场</b>、<b>MTF vs 空间频率</b></li>
+      <li><span class="tag op">🖱 操作</span>每张图下方 <b>⬇ 下载像差图</b> 存 PNG；切换类型有缓存，回来即显</li>
+    </ul>
+    <div class="note info">💡 深空镜头重点看：场曲（平场）、MTF（锐度）、RMS-vs-场（像场一致性）。首次计算 1-5 秒，之后秒回。</div>
+  </div>
+</section>
+
+<!-- ============ 10 轴向色差 ============ -->
+<section class="card" id="c10">
+  <div class="card-head"><div class="num">10</div><div>
+    <h2>🌈 轴向色差（APO 判定）</h2>
+    <div class="sub">像差分析视图内展开</div>
+  </div></div>
+  <div class="card-body">
+    <img class="shot" src="shots/11_轴向色差.png" alt="轴向色差">
+    <ul class="steps">
+      <li><span class="tag op">🖱 操作</span>像差分析视图展开 <b>🌈 轴向色差（APO）</b></li>
+      <li><span class="tag see">🔍 看到</span>上图：场曲（Field vs Image Plane Delta，四线＝T/S × 双波长）；下图：<b>轴向色差（后焦距差）</b>——F/d/C 三波长焦点分离曲线，峰值即 AXCL</li>
+      <li><span class="tag see">🔍 看到</span>当前设计：峰值 0.086mm —— 指标行 AXCL +0.086 与之对应</li>
+    </ul>
+    <div class="note ok">✅ APO 判定：峰值 &lt; 0.1mm 即达 APO 级别（本工具设计目标）。此图是"APO 认证"的关键证据。</div>
+  </div>
+</section>
+
+<!-- ============ 11 优化 ============ -->
+<section class="card" id="c11">
+  <div class="card-head"><div class="num">11</div><div>
+    <h2>⚡ 局部优化：目标差距一眼可见</h2>
+    <div class="sub">设计 tab → 展开"⚡ 优化（局部）"</div>
+  </div></div>
+  <div class="card-body">
+    <img class="shot" src="shots/12_优化.png" alt="局部优化">
+    <ul class="steps">
+      <li><span class="tag op">🖱 操作</span>设计 tab 展开 <b>⚡ 优化（局部）</b>（在 LDE 表格下方）</li>
+      <li><span class="tag see">🔍 看到</span><b>MFE 分解预览</b>：当前 EFFL 200.1（目标 200）｜ AXCL +0.086（目标 0.05）｜ RSCE 474µm —— 优化前先看清差距</li>
+      <li><span class="tag op">🖱 操作</span>勾选 <b>快速模式（近轴，~10s）</b>＝不含星点，快但粗；标准模式含 RSCE，1-3 分钟更准；勾选 <b>包含镜片厚度</b>＝厚度也当变量（默认只动空气间隔+后焦）</li>
+      <li><span class="tag op">🖱 操作</span>点 <b>▶ 运行优化</b> → 进度条 + <b>收敛曲线</b>实时绘制 → 完成后指标行自动刷新</li>
+    </ul>
+    <div class="note">⚠️ 优化器：Nelder-Mead 多起点搜索。快速模式适合调色差/焦距；最终定稿建议跑标准模式。</div>
+  </div>
+</section>
+
+<!-- ============ 12 状态栏 ============ -->
+<section class="card" id="c12">
+  <div class="card-head"><div class="num">12</div><div>
+    <h2>📊 页脚状态栏：全参数一屏速览</h2>
+    <div class="sub">任何页面的最底部</div>
+  </div></div>
+  <div class="card-body">
+    <img class="shot" src="shots/13_页脚.png" alt="页脚状态栏">
+    <ul class="steps">
+      <li><span class="tag see">🔍 看到</span>一行状态：<b>口径 40.0mm | F/# 0.20 | 波长 0.4861/0.5876/0.6563µm | 视场 0/2/4.06/5.8° | 主波长 λ1 | 视场类型 angle | 物距 ∞ | 18 面 | 总长 208.6mm</b></li>
+      <li><span class="tag see">🔍 看到</span>版本行：镜头设计工作台 v0.14 ｜ 自包含数据 data/（镜片库 + 内置玻璃表，无外部依赖）</li>
+      <li><span class="tag op">🖱 操作</span>任何改动后滚到最底部核对当前系统状态，导出/汇报前截图留档</li>
+    </ul>
+    <div class="note info">💡 状态栏 = 系统的"飞行仪表盘"：物距 ∞ 表示无穷远（深空），视场类型 angle 表示角度视场。配合《使用说明.md》一起阅读效果更佳。</div>
+  </div>
+</section>
+
+<footer>
+  🔭 镜头设计工作台 v0.14 ｜ 图文教程 · 截图自实际运行界面（2026-08-19）<br>
+  配套文档：《使用说明.md》（16 章完整手册）· README.md（项目简介）· LICENSE（MIT）
+</footer>
+
+</div>
+</body>
+</html>
