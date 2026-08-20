@@ -314,10 +314,19 @@ with st.sidebar:
                 _bs = None
                 _ga_error = None
                 # 侧边栏路径兜底（v0.30.2）：主工作区的 epd/fields_ui/wavs_ui 在
-                # L471 才赋值，本按钮块在其之前执行——从 session_state 读取 + 默认值
+                # L471 才赋值，本按钮块在其之前执行——从 session_state 读取 + 规范化
                 _epd = float(st.session_state.get('epd', 40.0))
-                _fields_ui = tuple(st.session_state.get('fields', (0.0, 2.0, 4.06, 5.8)))
-                _wavs_ui = st.session_state.get('wavs') or [(0.48613, 1.0), (0.58756, 1.0), (0.65627, 1.0)]
+                _fields_raw = st.session_state.get('fields', (0.0, 2.0, 4.06, 5.8))
+                # 视场兼容两种格式：纯度数 (0,2,4.06,5.8) / 带权重 [(0,1),(2,1),...]——取第一分量
+                _fields_ui = tuple((f[0] if isinstance(f, (tuple, list)) else f)
+                                   for f in _fields_raw)
+                _wavs_raw = st.session_state.get('wavs')
+                if _wavs_raw:
+                    # 波长兼容两种格式：纯波长 (0.486,0.588,0.656) / [(λ,weight)]——补权重 1.0
+                    _wavs_ui = [(float(w[0]), float(w[1])) if isinstance(w, (tuple, list))
+                                else (float(w), 1.0) for w in _wavs_raw]
+                else:
+                    _wavs_ui = [(0.48613, 1.0), (0.58756, 1.0), (0.65627, 1.0)]
                 if _ga_eng.startswith('近轴'):
                     if int(_ga_ng) != 6:
                         st.error('近轴引擎固定 6 组基因——其他组数请用"内置 optiland"')
