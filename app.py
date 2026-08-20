@@ -319,9 +319,11 @@ with st.sidebar:
                     else:
                         try:
                             with st.spinner('近轴 GA 运行中（向量化，很快）...'):
+                                # 近轴引擎种群自动放大：UI 默认 16 是为内置 GA 设计，
+                                # 向量化引擎需要更大种群才有意义（500+ 也只需数秒）
                                 _genes, _hist = ga_engine.run_ga_remote(
                                     engine='gpu' if 'GPU' in _ga_eng else 'cpu',
-                                    pop=int(_ga_pop), gens=int(_ga_gen), seed=_seed_now,
+                                    pop=max(int(_ga_pop), 500), gens=int(_ga_gen), seed=_seed_now,
                                     target_efl=float(_ga_efl), progress=_prog)
                             _bs = elite_to_specs(
                                 [(int(_genes[i]), int(_genes[6 + i])) for i in range(6)],
