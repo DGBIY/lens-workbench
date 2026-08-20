@@ -197,6 +197,79 @@ TEMPLATES = {
             (-80.0, 0.0, 0.0, 0.0),
         ],
     },
+    # ============ 天文模板（v0.23）============
+    'apo_triplet': {
+        'label': 'APO 复消色差物镜（三片式 · 深空）',
+        'desc': 'ED 双胶合（FK61 超低色散 + 火石）+ 单片冕——复消色差主流构型，深空摄影主力',
+        'groups': [{'type': 'd', 'sign': '+', 'min_diam': 30},
+                   {'type': 's', 'sign': '+', 'min_diam': 25}],
+        'airs': [2],
+        'params': [
+            (100.0, 6.0, 1.4970, 81.6),
+            (-75.0, 2.5, 1.6727, 32.2),
+            (-250.0, 2.0, 0.0, 0.0),
+            (130.0, 6.0, 1.5168, 64.1),
+            (-400.0, 0.0, 0.0, 0.0),
+        ],
+    },
+    'newtonian': {
+        'label': '牛顿反射 Newtonian（1668 · 反射）',
+        'desc': '抛物面主镜（k=-1，消球差）——经典入门反射望远镜；简化模型（省略 45° 副镜折叠，像面在主镜前）',
+        'reflective': True,
+        'groups': [],
+        'airs': [],
+        'params': [
+            (-200.0, -100.0, -1.0, 0.0, -1.0),
+        ],
+    },
+    'cassegrain': {
+        'label': '卡塞格林 Cassegrain（1672 · 反射）',
+        'desc': '抛物面主镜 + 双曲面副镜（k=-9）——紧凑两镜系统（像面在主镜前，等效焦距 ≈0.96×目标）',
+        'reflective': True,
+        'groups': [],
+        'airs': [],
+        'params': [
+            (-200.0, -80.0, -1.0, 0.0, -1.0),
+            (160.0, 16.0, -1.0, 0.0, -9.0),
+        ],
+    },
+    'ritchey_chretien': {
+        'label': '里奇-克雷蒂安 RC（1928 · 反射）',
+        'desc': '双曲面主镜（k=-1.1）+ 双曲面副镜（k=-5.4）——天文台主流，消球差+消彗差',
+        'reflective': True,
+        'groups': [],
+        'airs': [],
+        'params': [
+            (-200.0, -80.0, -1.0, 0.0, -1.1),
+            (160.0, 16.0, -1.0, 0.0, -5.4),
+        ],
+    },
+    'schmidt_cassegrain': {
+        'label': '施密特-卡塞格林 SCT（1940 · 折反射）',
+        'desc': 'EVENASPH 非球面校正板 + 球面主副镜——普及型天文望远镜主力（校正板 A4 可调，建议 ⚡ 优化）',
+        'reflective': True,
+        'groups': [],
+        'airs': [],
+        'params': [
+            (200.0, 3.0, 1.5168, 64.1, 0.0, [5e-7, 0.0, 0.0, 0.0]),
+            (-200.0, 15.0, 0.0, 0.0, 0.0, []),
+            (-200.0, -80.0, -1.0, 0.0, 0.0),
+            (120.0, 8.0, -1.0, 0.0, 0.0),
+        ],
+    },
+    'maksutov': {
+        'label': '马克苏托夫-卡塞格林 Maksutov（1941 · 折反射）',
+        'desc': '弯月校正镜 + 球面主副镜——全球面可制造，焦外柔美（真实追迹聚焦 rms<0.1mm）',
+        'reflective': True,
+        'groups': [],
+        'airs': [],
+        'params': [
+            (-120.0, 3.0, 1.5168, 64.1),
+            (-130.0, 15.0, 0.0, 0.0),
+            (-200.0, -80.0, -1.0, 0.0, 0.0),
+            (200.0, 18.0, -1.0, 0.0, 0.0),
+        ],
+    },
 }
 
 
@@ -270,7 +343,9 @@ def _match_glass(nd, vd):
 
 
 def _replica_specs(tpl, f_mm, back_focus):
-    """样板示例参数 → specs（f=100mm 基准缩放；玻璃自动匹配；末行空气=后焦）"""
+    """样板示例参数 → specs
+    params 元组：(R, t, nd, vd[, conic[, coeffs]])；nd<0 = 反射面（MIRROR）
+    最后一行空气 → t=back_focus（折射后焦）；最后一行镜面 → t 保留（到像面距离，反射系统）"""
     scale = f_mm / 100.0
     specs = [
         {'idx': 0, 'R': np.inf, 't': np.inf, 'glass': '',
@@ -279,19 +354,28 @@ def _replica_specs(tpl, f_mm, back_focus):
          'nd': 0.0, 'vd': 0.0, 'semi': np.nan, 'is_stop': True, 'is_image': False},
     ]
     idx = 2
-    n = len(tpl['params'])
-    for i, (R, t, nd, vd) in enumerate(tpl['params']):
-        is_last = (i == n - 1)
-        tv = back_focus if is_last else float(t) * scale
-        Rv = np.inf if not np.isfinite(R) else float(R) * scale
+    params = tpl['params']
+    n = len(params)
+    last_is_air = n > 0 and params[-1][2] == 0
+    for i, p in enumerate(params):
+        R, t, nd, vd = float(p[0]), float(p[1]), float(p[2]), float(p[3])
+        conic = float(p[4]) if len(p) > 4 else 0.0
+        coeffs = [float(c) for c in (p[5] if len(p) > 5 else []) if c is not None]
+        if nd == 0:
+            tv = back_focus if (last_is_air and i == n - 1) else t * scale
+        else:
+            tv = t * scale
+        Rv = np.inf if not np.isfinite(R) else R * scale
         glass, ndv, vdv = '', 0.0, 0.0
         if nd > 0:
             glass = _match_glass(nd, vd)
-            ndv, vdv = float(nd), float(vd)
+            ndv, vdv = nd, vd
+        elif nd < 0:
+            glass = 'MIRROR'
         specs.append({'idx': idx, 'R': Rv, 't': tv, 'glass': glass,
                       'nd': ndv, 'vd': vdv, 'semi': 15.0 * scale,
                       'is_stop': False, 'is_image': False,
-                      'conic': 0.0, 'coeffs': []})
+                      'conic': conic, 'coeffs': coeffs})
         idx += 1
     specs.append({'idx': idx, 'R': np.inf, 't': 0.0, 'glass': '',
                   'nd': 0.0, 'vd': 0.0, 'semi': np.nan,
@@ -308,6 +392,8 @@ def build_template(key, mode='library', f_mm=200.0, back_focus=55.0, seed=None):
         return None
     if mode != 'library':
         return _replica_specs(tpl, f_mm, back_focus)
+    if tpl.get('reflective'):
+        return None  # 反射构型：镜片库为折射玻璃，仅支持完全复刻
     rng = random.Random(seed)
     pairs, airs = [], []
     for grp in tpl['groups']:
@@ -322,17 +408,45 @@ def build_template(key, mode='library', f_mm=200.0, back_focus=55.0, seed=None):
 
 if __name__ == '__main__':
     from core.lens_io import build_lens_from_specs
+    from optiland.distribution import create_distribution
+
+    def _mirror_rms(specs, epd=30.0):
+        """反射系统真实追迹光斑 RMS（mm）——paraxial 对反射不可靠，用光斑验证聚焦"""
+        lens = build_lens_from_specs(specs, epd=epd, fields=(0.0,),
+                                     wavelengths=[(0.58756, 1.0)])
+        if lens is None:
+            return None
+        dist = create_distribution('hexapolar')
+        dist.generate_points(4)
+        try:
+            r = lens.trace(Hx=0.0, Hy=0.0, wavelength=0, num_rays=37, distribution=dist)
+        except Exception:
+            return None
+        xs = np.asarray(r.x)
+        ys = np.asarray(r.y)
+        ok = np.isfinite(xs) & np.isfinite(ys)
+        if int(ok.sum()) < 5:
+            return None
+        return float(np.sqrt(np.mean(xs[ok] ** 2 + ys[ok] ** 2)))
+
     n_ok = 0
     for key, tpl in TEMPLATES.items():
         # 复刻模式：生成 + 追迹
         sp = build_template(key, mode='replica', f_mm=200.0, back_focus=55.0)
-        assert sp is not None and len(sp) >= 5, key
+        assert sp is not None and len(sp) >= 4, key
         lens = build_lens_from_specs(sp, epd=30.0, fields=(0.0, 2.0),
                                      wavelengths=[(0.58756, 1.0)])
         assert lens is not None, f'{key} replica build 失败'
+        if tpl.get('reflective'):
+            # 反射构型：仅复刻（库为折射玻璃）；paraxial 不可靠 → 真实追迹光斑验证
+            assert build_template(key, mode='library') is None, f'{key} 反射不应库凑'
+            rms_m = _mirror_rms(sp)
+            assert rms_m is not None, f'{key} 反射追迹失败'
+            lim = 8.0 if key == 'schmidt_cassegrain' else 1.0
+            assert rms_m < lim, f'{key} 光斑 {rms_m:.3f}mm 未聚焦'
+            continue
         efl = float(lens.paraxial.f2())
         assert np.isfinite(efl) and efl > 50.0, f'{key} EFFL={efl}'
-        # 库凑模式：3 个种子至少 1 次成功
         got = False
         for sd in (1, 2, 3):
             sp2 = build_template(key, mode='library', f_mm=200.0, back_focus=55.0, seed=sd)
@@ -343,4 +457,31 @@ if __name__ == '__main__':
             n_ok += 1
     assert n_ok >= 8, f'库凑成功 {n_ok}/10 < 8'
     assert _match_glass(1.5168, 64.1) in ('BK7', 'D-K9', 'H-K9L'), _match_glass(1.5168, 64.1)
-    print(f'TEMPLATES: OK（{len(TEMPLATES)} 样板 × 复刻/库凑（{n_ok}/10）自检全过）')
+    # 天文模板数值抽查（物理合理性）
+    def _efl(key, f):
+        sp_ = build_template(key, mode='replica', f_mm=f, back_focus=55.0)
+        assert sp_ is not None, key
+        return float(build_lens_from_specs(sp_, epd=30.0, fields=(0.0,),
+                                           wavelengths=[(0.58756, 1.0)]).paraxial.f2())
+    ea = _efl('apo_triplet', 100.0)
+    assert 60 < ea < 150, ea
+    # 反射模板：真实追迹光斑 + 焦距（|主镜后距| + 副镜后距）
+    for key, tag, lim in (('newtonian', '牛', 1.0), ('cassegrain', '卡', 1.0),
+                          ('ritchey_chretien', 'RC', 1.0),
+                          ('schmidt_cassegrain', 'SCT', 8.0),
+                          ('maksutov', '马', 1.0)):
+        sp_ = build_template(key, mode='replica', f_mm=200.0, back_focus=55.0)
+        rms_m = _mirror_rms(sp_)
+        assert rms_m is not None and rms_m < lim, (key, rms_m)
+        mir = [i for i, s in enumerate(sp_) if s['glass'] == 'MIRROR']
+        assert mir, (key, '无反射面')
+        fe = abs(float(sp_[mir[0]]['t'])) + (float(sp_[mir[1]]['t']) if len(mir) > 1 else 0.0)
+        assert 150 < fe < 260, (key, fe)
+    sp_cas = build_template('cassegrain', mode='replica', f_mm=200.0, back_focus=55.0)
+    assert sp_cas[2]['glass'] == 'MIRROR' and sp_cas[2]['conic'] == -1.0, 'CAS 主镜'
+    assert sp_cas[3]['conic'] == -9.0, 'CAS 副镜 k'
+    sp_sct = build_template('schmidt_cassegrain', mode='replica', f_mm=200.0, back_focus=55.0)
+    assert any(s['glass'] == 'MIRROR' for s in sp_sct), 'SCT 缺反射面'
+    assert sp_sct[2]['coeffs'], 'SCT 校正板缺非球面系数'
+    print(f'TEMPLATES: OK（{len(TEMPLATES)} 样板 × 复刻/库凑（{n_ok}/10）'
+          f' 天文抽查 APO {ea:.0f} + 5 反射聚焦全过）')

@@ -326,7 +326,9 @@ wavs_ui = st.session_state.wavs
 
 m = evaluate_specs(specs, epd=epd, fields=fields_ui, wavelengths=wavs_ui)
 mc1, mc2, mc3, mc4, mc5, mc6 = st.columns(6)
-mc1.metric('近轴 EFFL (mm)', f"{m['efl']:.1f}" if np.isfinite(m['efl']) else '—')
+_has_mirror = any(str(s.get('glass', '')).upper() == 'MIRROR' for s in specs)
+mc1.metric('近轴 EFFL (mm)',
+           ('— 反射系统' if _has_mirror else (f"{m['efl']:.1f}" if np.isfinite(m['efl']) else '—')))
 mc2.metric('AXCL (mm)', f"{m['axcl']:+.3f}" if np.isfinite(m['axcl']) else '—')
 mc3.metric('总长 (mm)', f"{m['total']:.1f}" if np.isfinite(m['total']) else '—')
 mc4.metric('RSCE (µm)', f"{m['rsce_um']:.0f}" if np.isfinite(m['rsce_um']) else '—')
@@ -482,11 +484,16 @@ with tab_work:
         k1, k2 = st.columns([2, 1])
         with k1:
             _tpl = st.selectbox('构型', list(TEMPLATES.keys()),
-                                format_func=lambda k: TEMPLATES[k]['label'], key='tpl_sel')
+                                format_func=lambda k: ('🪞 ' if TEMPLATES[k].get('reflective') else '🔭 ')
+                                + TEMPLATES[k]['label'], key='tpl_sel')
         with k2:
-            _tpl_mode = st.radio('生成模式', ['① 镜片库凑', '② 完全复刻'], horizontal=True,
-                                 key='tpl_mode')
-        st.caption(f'💡 {TEMPLATES[_tpl]["desc"]}')
+            _tpl_refl = bool(TEMPLATES[_tpl].get('reflective'))
+            _tpl_opts = ['② 完全复刻'] if _tpl_refl else ['① 镜片库凑', '② 完全复刻']
+            _tpl_mode = st.radio('生成模式', _tpl_opts, horizontal=True, key='tpl_mode',
+                                 help=('🪞 反射构型：镜片库为折射玻璃，仅支持完全复刻'
+                                       if _tpl_refl else '① 从镜片库凑出结构近似；② 按样板参数直接生成'))
+        st.caption(('🪞 ' if _tpl_refl else '💡 ') + TEMPLATES[_tpl]['desc']
+                   + ('｜反射构型仅支持完全复刻' if _tpl_refl else ''))
         p1, p2, p3 = st.columns(3)
         with p1:
             _tpl_f = st.number_input('目标焦距 (mm)', 50.0, 500.0, 200.0, step=10.0, key='tpl_f')
@@ -1027,7 +1034,7 @@ _total = sum(float(s['t']) for s in specs[:-1]
 st.divider()
 _pw_idx = int(st.session_state.get('primary_wl', 0)) + 1
 _od_txt = '∞' if not np.isfinite(specs[0]['t']) else f'{specs[0]["t"]:.0f}'
-_fno_txt = f"{epd / m['efl']:.2f}" if np.isfinite(m['efl']) and m['efl'] > 0 else '—'
+_fno_txt = ('—' if _has_mirror else (f"{epd / m['efl']:.2f}" if np.isfinite(m['efl']) and m['efl'] > 0 else '—'))
 st.caption(f'📊 {epd:.1f} mm | F/# {_fno_txt} | 波长 {_wl_txt} µm | 视场 {_fld_txt} | 主波长 λ{_pw_idx} | '
            f'视场类型 {st.session_state.get("field_type", "angle")} | 物距 {_od_txt} | {len(specs)} 面 | 总长 {_total:.1f} mm')
 st.caption(f'镜头设计工作台 {CFG.VERSION} | 自包含数据: data/（镜片库 + 内置玻璃表，无外部依赖）')

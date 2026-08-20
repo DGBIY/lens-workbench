@@ -165,8 +165,11 @@ def build_lens_from_specs(specs, epd=40.0, fields=(0.0, 2.0, 4.06, 5.8),
             kwargs = {'index': s['idx'], 'radius': float(s['R']),
                       'thickness': float(s['t'])}
             if s['glass']:
-                nd, vd = _agf_params(s['glass'], float(s['nd']), float(s['vd']))
-                kwargs['material'] = AbbeMaterial(nd, vd, 'buchdahl')
+                if str(s['glass']).upper() == 'MIRROR':
+                    kwargs['material'] = 'mirror'
+                else:
+                    nd, vd = _agf_params(s['glass'], float(s['nd']), float(s['vd']))
+                    kwargs['material'] = AbbeMaterial(nd, vd, 'buchdahl')
             # 非球面（v0.21）：conic + 偶次系数 → even_asphere（= Zemax EVENASPH）
             conic = float(s.get('conic', 0.0) or 0.0)
             coeffs = [float(c) for c in (s.get('coeffs') or []) if c is not None]
@@ -251,8 +254,9 @@ def df_to_specs(df):
         if i > 1 and i < n - 1 and not np.isfinite(t):
             t = 5.0   # 白纸作画：LDE dynamic 新行默认厚度
         glass = str(row.get('Glass', row.get('玻璃', ''))).strip()
+        is_mirror = glass.upper() == 'MIRROR'
         nd, vd = 0.0, 0.0
-        if glass:
+        if glass and not is_mirror:
             g_nd = row.get('ND', row.get('nd', np.nan))
             g_vd = row.get('VD', row.get('vd', np.nan))
             try:
