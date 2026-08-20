@@ -385,9 +385,17 @@ with st.sidebar:
                         st.pyplot(_ly)
                         st.caption('↑ 2D 布局图（镜片结构 + 近轴光线，F/# 与 EFL 标注）')
                     if _hist:
-                        st.line_chart(pd.DataFrame(
-                            {'gen': [h[0] for h in _hist],
-                             'best_mfe': [h[1] for h in _hist]}).set_index('gen'))
+                        import plotly.graph_objects as _go
+                        _gf = _go.Figure(_go.Scatter(
+                            x=[h[0] for h in _hist], y=[h[1] for h in _hist],
+                            mode='lines+markers', name='best MFE',
+                            hovertemplate='第 %{x} 代<br>best MFE = %{y:.4f}<extra></extra>'))
+                        _gf.update_layout(
+                            title='GA 收敛曲线（可缩放/框选）',
+                            xaxis_title='代数', yaxis_title='best MFE',
+                            template='plotly_dark', height=300,
+                            margin=dict(l=40, r=20, t=50, b=40))
+                        st.plotly_chart(_gf, use_container_width=True)
                 else:
                     st.error('GA 失败（无有效个体）——检查镜片库或减小组数')
 
@@ -403,8 +411,14 @@ with st.sidebar:
                     if _hs:
                         _g_, _b_ = run_control.read_history_csv(_hs[0])
                         if _g_:
-                            st.line_chart(pd.DataFrame({'gen': _g_, 'best_mfe': _b_})
-                                          .set_index('gen'), height=140)
+                            import plotly.graph_objects as _go
+                            _gf = _go.Figure(_go.Scatter(
+                                x=_g_, y=_b_, mode='lines', name='best MFE',
+                                hovertemplate='第 %{x} 代<br>best = %{y:.4f}<extra></extra>'))
+                            _gf.update_layout(template='plotly_dark', height=140,
+                                              margin=dict(l=30, r=10, t=20, b=25),
+                                              showlegend=False)
+                            st.plotly_chart(_gf, use_container_width=True)
 
     else:  # 🛠 设计
         with st.expander('🆕 画布管理', expanded=True):
@@ -674,7 +688,14 @@ with tab_work:
                 else:
                     st.session_state.msg = ('warn', f'优化未改善（{_b:.4f} → {_a:.4f}），保持原结构')
                 if _h:
-                    st.line_chart(pd.DataFrame({'MFE 历史': _h}))
+                    import plotly.graph_objects as _go
+                    _gf = _go.Figure(_go.Scatter(
+                        y=_h, mode='lines+markers', name='MFE',
+                        hovertemplate='迭代 %{x}<br>MFE = %{y:.4f}<extra></extra>'))
+                    _gf.update_layout(title='局部优化 MFE 历史', yaxis_title='MFE',
+                                      template='plotly_dark', height=280,
+                                      margin=dict(l=40, r=20, t=50, b=40))
+                    st.plotly_chart(_gf, use_container_width=True)
 
     # ---- 分析视图（segmented 窗口切换，缓存图避免重算）----
     st.divider()
@@ -880,7 +901,23 @@ with tab_ga:
                 _df = pd.DataFrame({'gen': g, 'best_mfe': b})
                 _df['最优保持'] = _df['best_mfe'].cummin()
                 _df['平滑(5代)'] = _df['best_mfe'].rolling(5, min_periods=1).mean()
-                st.line_chart(_df.set_index('gen'), height=340)
+                import plotly.graph_objects as _go
+                _gf = _go.Figure()
+                _gf.add_trace(_go.Scatter(x=_df['gen'], y=_df['best_mfe'],
+                                          mode='lines+markers', name='best MFE',
+                                          hovertemplate='第 %{x} 代<br>best = %{y:.4f}<extra></extra>'))
+                _gf.add_trace(_go.Scatter(x=_df['gen'], y=_df['最优保持'],
+                                          mode='lines', name='最优保持',
+                                          hovertemplate='第 %{x} 代<br>保持 = %{y:.4f}<extra></extra>'))
+                _gf.add_trace(_go.Scatter(x=_df['gen'], y=_df['平滑(5代)'],
+                                          mode='lines', name='平滑(5代)',
+                                          hovertemplate='第 %{x} 代<br>平滑 = %{y:.4f}<extra></extra>'))
+                _gf.update_layout(title='收敛曲线（可缩放/框选）',
+                                  xaxis_title='代数', yaxis_title='best MFE',
+                                  template='plotly_dark', height=340,
+                                  margin=dict(l=40, r=20, t=50, b=40),
+                                  legend=dict(orientation='h', y=1.12))
+                st.plotly_chart(_gf, use_container_width=True)
                 st.caption(f'共 {len(g)} 个数据点 | best {b[-1]:.4f}（第 {g[-1]:.0f} 代）'
                            f' | 相对首代提升 {b[0] / b[-1]:.1f}×'
                            + (' | ⏳ 仍在运行' if _info['running'] else ''))

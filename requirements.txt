@@ -4,6 +4,7 @@ numpy>=1.24
 pandas>=1.5
 matplotlib>=3.7
 scipy>=1.10
+plotly>=5.18
 # 推荐：直接使用 完整项目\python_env\python.exe 运行（已内置全部依赖：
-# torch 2.9+cu126 / numpy 1.26 / matplotlib 3.10 / pandas 3.0 / streamlit 1.61 / scipy 1.15）
+# torch 2.9+cu126 / numpy 1.26 / matplotlib 3.10 / pandas 3.0 / streamlit 1.61 / scipy 1.15 / plotly）
 # optiland 为本地 wheel（新/references/optiland_whl/），pip 安装：pip install optiland-*.whl
