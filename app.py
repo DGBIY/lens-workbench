@@ -65,6 +65,16 @@ from core import run_control
 from core.compare import compare_table, load_multi
 from core.analysis import (analysis_fig, axial_color_fig, optimize_local,
                            search_glass, mtf_fig, KINDS)
+from core.astro_tools import (pixel_scale, fov, diffraction_limit, airy_diameter,
+                              fwhm_arcsec, sampling_ratio, critical_focus_depth,
+                              limit_magnitude, light_gain, plate_shift,
+                              reducer_effect, thermal_shift,
+                              image_scale, pixels_on_body, star_photons,
+                              sky_photons_per_px, snr, limiting_magnitude,
+                              stacked_limit, combined_focal, reducer_design,
+                              reducer_focal_for)
+from core.starfield import (render_starfield, render_exposure_stars,
+                            best_focus_offset, _SKY_MAG, _BODY_DEG)
 
 DEFAULT_FILE = 'run_20260818_213729/ga_elite.txt'
 DEFAULT_IDX = 55
@@ -331,7 +341,7 @@ with tc3:
         st.session_state.msg = ('ok', '半口径已按通光自动更新')
 
 # ============ 主区 ============
-tab_work, tab_cmp, tab_ga = st.tabs(['🛠 设计', '📊 多精英对比', '📈 GA 收敛 + 运行'])
+tab_work, tab_cmp, tab_ga, tab_astro = st.tabs(['🛠 设计', '📊 多精英对比', '📈 GA 收敛 + 运行', '🔭 天文工具'])
 
 with tab_work:
     # ---- LDE 全宽 ----
@@ -347,7 +357,11 @@ with tab_work:
                   'Thick': [0, len(cur_df) - 1],
                   'Glass': [0, len(cur_df) - 1],
                   'ND': [0, len(cur_df) - 1],
-                  'VD': [0, len(cur_df) - 1]},
+                  'VD': [0, len(cur_df) - 1],
+                  'Conic': [0, len(cur_df) - 1],
+                  'A4': [0, len(cur_df) - 1],
+                  'A6': [0, len(cur_df) - 1],
+                  'A8': [0, len(cur_df) - 1]},
         column_config={
             'Surf': st.column_config.NumberColumn('Surf', width='small'),
             'Radius': st.column_config.NumberColumn('Radius', width='medium', format='%.3f'),
@@ -356,6 +370,14 @@ with tab_work:
             'ND': st.column_config.NumberColumn('ND', width='small', format='%.5f'),
             'VD': st.column_config.NumberColumn('VD', width='small', format='%.1f'),
             'Semi-Dia': st.column_config.NumberColumn('Semi-Dia', width='small', format='%.2f'),
+            'Conic': st.column_config.NumberColumn('Conic', width='small', format='%.3f',
+                                                   help='圆锥常数 k（EVENASPH：0=球面）'),
+            'A4': st.column_config.NumberColumn('A4 (ρ⁴)', width='small', format='%.3e',
+                                                help='偶次非球面 ρ⁴ 系数（Zemax A4）'),
+            'A6': st.column_config.NumberColumn('A6 (ρ⁶)', width='small', format='%.3e',
+                                                help='偶次非球面 ρ⁶ 系数（Zemax A6）'),
+            'A8': st.column_config.NumberColumn('A8 (ρ⁸)', width='small', format='%.3e',
+                                                help='偶次非球面 ρ⁸ 系数（Zemax A8）'),
             '备注': st.column_config.TextColumn('Comment', width='medium'),
         })
     if edited is not None and not edited.equals(cur_df):
@@ -669,6 +691,267 @@ with tab_ga:
                 st.code(run_control.tail_log(log_path, 100), language='text')
 
     _ga_curve()
+
+# ============ 🔭 天文工具 ============
+with tab_astro:
+    st.subheader('🔭 天文摄影工具')
+    st.caption('深空摄影光学计算（基于当前镜头实时数据 + 标准天文公式）')
+
+    _am = evaluate_specs(specs, epd=epd, fields=fields_ui, wavelengths=wavs_ui)
+    _af = float(_am['efl']) if np.isfinite(_am['efl']) else 200.0
+    _arsce = float(_am['rsce_um']) if np.isfinite(_am['rsce_um']) else 0.0
+
+    # ---- 1. 成像系统计算器 ----
+    with st.expander('📷 成像系统计算器', expanded=True):
+        s1, s2, s3 = st.columns(3)
+        with s1:
+            _sens = st.selectbox('传感器', ['全画幅 36×24mm', 'APS-C 23.5×15.6mm',
+                                           'M4/3 17.3×13mm', '1″ 13.2×8.8mm', '自定义'],
+                                 key='astro_sens')
+            _sdim = {'全画幅 36×24mm': (36.0, 24.0), 'APS-C 23.5×15.6mm': (23.5, 15.6),
+                     'M4/3 17.3×13mm': (17.3, 13.0), '1″ 13.2×8.8mm': (13.2, 8.8),
+                     '自定义': (36.0, 24.0)}[_sens]
+        with s2:
+            _px = st.number_input('像元尺寸 (µm)', 1.0, 20.0, 3.76, step=0.01, key='astro_px')
+        with s3:
+            _fuse = st.number_input('焦距 (mm，默认=当前镜头)', 10.0, 3000.0,
+                                    float(_af), step=1.0, key='astro_f')
+        _fno = _fuse / epd if epd > 0 else 0.0
+        _ps = pixel_scale(_fuse, _px)
+        _fw, _fh = fov(*_sdim, _fuse)
+        _dl = diffraction_limit(epd)
+        _airy = airy_diameter(_fno)
+        _fwhm = fwhm_arcsec(_arsce, _fuse)
+        _samp = sampling_ratio(_fwhm, _ps)
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric('像元尺度', f'{_ps:.2f}″/px')
+        m2.metric('视场', f'{_fw:.2f}° × {_fh:.2f}°')
+        m3.metric('衍射极限', f'{_dl:.2f}″')
+        m4.metric('艾里斑直径', f'{_airy:.1f} µm')
+        m5, m6, m7, m8 = st.columns(4)
+        m5.metric('星点 FWHM（当前设计）', f'{_fwhm:.2f}″',
+                  help='≈2.355×RSCE（全视场最大 RMS）；中心星点以 Spot 图场 0 为准')
+        m6.metric('采样率 FWHM/px', f'{_samp:.1f}' if np.isfinite(_samp) else '—')
+        m7.metric('极限星等', f'{limit_magnitude(epd):.1f} 等')
+        m8.metric('集光力', f'{light_gain(epd):.0f}× 人眼')
+        if np.isfinite(_samp):
+            if _samp < 1.5:
+                st.warning(f'⚠️ 欠采样：FWHM {_fwhm:.2f}″ < 1.5 像元（{_ps:.2f}″/px）——星点细节丢失，建议更小像元或增倍镜')
+            elif _samp > 4.0:
+                st.info(f'💡 过采样：FWHM 跨 {_samp:.1f} 像元——可考虑减焦镜提升视场/信噪比')
+            else:
+                st.success('✅ 采样合理（1.5-4 像元/FWHM，Nyquist 附近）')
+        st.caption(f'参考：衍射极限 138.4/D = 138.4/{epd:.0f}mm；艾里斑 2.44λF#；极限星等按人眼 7mm 基准 6.5 等近似')
+
+    # ---- 3. 月面 / 行星像比例 ----
+    with st.expander('🪐 月面 / 行星像比例'):
+        st.caption('天体像直径 = f·tan(角直径)；行星按冲日典型值——规划增倍镜 / 行星相机像元用')
+        b1, b2 = st.columns(2)
+        with b1:
+            _bd = st.selectbox('天体', list(_BODY_DEG.keys()), key='astro_body')
+        with b2:
+            _fb = st.number_input('焦距 (mm)', 10.0, 3000.0, float(_af), key='astro_fb')
+        _diam = image_scale(_fb, _BODY_DEG[_bd])
+        _pxn = pixels_on_body(_diam, _px)
+        q1, q2, q3 = st.columns(3)
+        q1.metric('像直径', f'{_diam:.2f} mm')
+        q2.metric(f'占像素（{_px:.2f}µm 像元）', f'{_pxn:.0f} px')
+        q3.metric('占画幅宽（36mm）', f'{_diam / 36 * 100:.1f}%')
+        st.caption(f'参考：{_bd} 角直径 {_BODY_DEG[_bd] * 3600:.0f}″；'
+                   '月亮 31′ ≈ 0.517°——200mm 下满月像直径约 1.8mm（全画幅的 5%）')
+
+    # ---- 4. 曝光 / 极限星等（SNR 光子统计）----
+    with st.expander('🌌 曝光 / 极限星等（SNR 模型）'):
+        st.caption('550nm 宽带光子统计：SNR = S/√(S + 天光 + 读出² + 暗电流·t)；'
+                   '天光主导时极限星等 ≈ 天光亮度限制（暗空 100mm/120s ≈ 18.9 等）')
+        e1, e2, e3 = st.columns(3)
+        with e1:
+            _em = st.number_input('目标星等 m', 8.0, 22.0, 15.0, step=0.5, key='astro_m')
+            _et = st.number_input('单张曝光 (s)', 10.0, 1200.0, 120.0, step=10.0, key='astro_t')
+        with e2:
+            _eq = st.number_input('量子效率 QE', 0.2, 0.95, 0.6, step=0.05, key='astro_qe')
+            _sky = st.selectbox('天光（mag/″²）', list(_SKY_MAG.keys()), key='astro_sky')
+        with e3:
+            _er = st.number_input('读出噪声 (e⁻)', 1.0, 15.0, 3.0, step=0.5, key='astro_r')
+            _ed = st.number_input('暗电流 (e⁻/s/px)', 0.0, 1.0, 0.05, step=0.01, key='astro_d')
+            _nfr = st.number_input('叠加张数', 1, 300, 20, step=1, key='astro_nfr')
+        _snr_v = snr(epd, _em, _et, _eq, _SKY_MAG[_sky], _ps, _er, _ed)
+        _mlim = limiting_magnitude(epd, _et, _eq, _SKY_MAG[_sky], _ps, _er, _ed)
+        _mlim_n = stacked_limit(_mlim, _nfr)
+        r1, r2, r3, r4 = st.columns(4)
+        r1.metric(f'{_em:.1f} 等星 SNR', f'{_snr_v:.0f}')
+        r2.metric('单张极限（SNR=10）', f'{_mlim:.1f} 等')
+        r3.metric(f'{_nfr} 张叠加极限', f'{_mlim_n:.1f} 等')
+        r4.metric('像元尺度', f'{_ps:.2f}″/px')
+        if _snr_v < 10:
+            st.warning('⚠️ SNR < 10：目标太暗或曝光不足——加曝光/叠加/减噪')
+        elif _snr_v < 50:
+            st.info('💡 SNR 10-50：可探测但噪声明显，建议增加叠加')
+        else:
+            st.success('✅ SNR ≥ 50：信噪比充足')
+
+    # ---- 2. 星点 / 视宁度 / 焦深 ----
+    with st.expander('🔭 星点 / 视宁度 / 焦深'):
+        _see = st.slider('视宁度 seeing (″)', 0.5, 6.0, 2.5, 0.1, key='astro_see')
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.metric('衍射极限', f'{_dl:.2f}″')
+        with c2:
+            st.metric('视宁度', f'{_see:.1f}″')
+        with c3:
+            st.metric('有效星点下限', f'{max(_dl, _see):.2f}″')
+        if _dl < _see:
+            st.info(f'💡 口径 {epd:.0f}mm 衍射极限 {_dl:.2f}″ < 视宁度 {_see:.1f}″——像质受视宁度限制，加大口径增益有限')
+        else:
+            st.success(f'✅ 口径 {epd:.0f}mm 衍射极限 {_dl:.2f}″ ≥ 视宁度——口径可发挥全部潜力')
+        _fdepth = critical_focus_depth(_fno)
+        _dt = st.slider('温度漂移 ΔT (K)', 0, 40, 10, key='astro_dt')
+        _tlen = sum(float(s['t']) for s in specs[:-1]
+                    if np.isfinite(s['t']) and s['t'] != float('inf'))
+        _th = thermal_shift(_tlen, _dt)
+        d1, d2 = st.columns(2)
+        with d1:
+            st.metric('临界焦深 ±2λF#²', f'±{_fdepth * 1000:.0f} µm',
+                      help='对焦精度需求（超过则星点明显变大）')
+        with d2:
+            st.metric(f'铝筒热漂移（ΔT={_dt}K）', f'{_th * 1000:.0f} µm',
+                      help='α=23e-6/K × 筒长 × ΔT')
+        if _th > _fdepth:
+            st.warning(f'⚠️ 温漂 {_th * 1000:.0f}µm 超过焦深 {_fdepth * 1000:.0f}µm——建议电动调焦/温补')
+
+    # ---- 3. 配件计算 ----
+    with st.expander('🛠 配件计算（滤镜 / 减焦 / 卡口）'):
+        f1, f2 = st.columns(2)
+        with f1:
+            st.markdown('**🧪 滤镜 / 平窗焦点位移**')
+            _ft = st.number_input('平板厚度 (mm)', 0.5, 10.0, 2.0, step=0.1, key='astro_ft')
+            _fn = st.number_input('折射率 n', 1.4, 1.9, 1.52, step=0.01, key='astro_fn')
+            _psh = plate_shift(_ft, _fn)
+            st.metric('焦点后移', f'{_psh:.2f} mm',
+                      help='安装滤镜后焦点向像面移动 t(1-1/n)，需重新对焦')
+        with f2:
+            st.markdown('**🔧 减焦 / 增倍镜**')
+            _k = st.number_input('系数（<1 减焦，>1 增倍）', 0.5, 2.0, 0.8, step=0.05, key='astro_k')
+            _rf, _rn, _rk = reducer_effect(_fuse, _fno, _k)
+            st.metric('合成系统', f'焦距 {_rf:.0f}mm | F{_rn:.2f}',
+                      help=f'FOV ×{_rk:.2f}（{"增大" if _k < 1 else "缩小"}）')
+        st.markdown('**📷 相机卡口法兰距参考**')
+        _cam = st.selectbox('相机', ['天文相机 T 环（55mm）', '佳能 EF（44mm）',
+                                    '索尼 E（18mm）', '尼康 Z（16mm）', '佳能 RF（20mm）'],
+                            key='astro_cam')
+        _fl = {'天文相机 T 环（55mm）': 55.0, '佳能 EF（44mm）': 44.0, '索尼 E（18mm）': 18.0,
+               '尼康 Z（16mm）': 16.0, '佳能 RF（20mm）': 20.0}[_cam]
+        _bfl_cur = float(specs[-2]['t']) if len(specs) > 2 and np.isfinite(specs[-2]['t']) else float('nan')
+        if np.isfinite(_bfl_cur):
+            st.caption(f'当前镜头后焦 BFL = {_bfl_cur:.1f}mm；{_cam.split("（")[0]} 法兰距 {_fl:.0f}mm'
+                       + (' —— ✅ 匹配（后焦 ≥ 法兰距，可直连）' if _bfl_cur >= _fl
+                          else f' —— ⚠️ 后焦差 {_fl - _bfl_cur:.1f}mm，需转接环/延长筒'))
+
+    # ---- 6. 平场镜（减焦镜）薄透镜设计 ----
+    with st.expander('🔧 平场镜（减焦镜）薄透镜设计'):
+        st.caption('薄透镜组合：1/f = 1/f₁ + 1/f₂ − d/(f₁f₂)；真实减焦镜是双胶合组——先定规格，再用 LDE 设计验证')
+        g1, g2 = st.columns(2)
+        with g1:
+            st.markdown('**正向：主镜 + 减焦镜 → 合成系统**')
+            _f2 = st.number_input('减焦镜焦距 f₂ (mm)', 50.0, 3000.0, 300.0, key='astro_f2')
+            _dd = st.number_input('间距 d (mm，主镜→减焦镜)', 5.0, 300.0, 40.0, key='astro_dd')
+            _fc = combined_focal(_fuse, _f2, _dd)
+            _rt = reducer_design(_fuse, _f2, _dd)
+            st.metric('合成焦距', f'{_fc:.0f} mm' if np.isfinite(_fc) else '∞')
+            st.metric('减焦率', f'{_rt:.2f}×' if np.isfinite(_rt) else '—')
+        with g2:
+            st.markdown('**反向：目标减焦率 → 所需 f₂（设计规格）**')
+            _rtg = st.number_input('目标减焦率', 0.5, 1.0, 0.8, step=0.05, key='astro_rtg')
+            _ddg = st.number_input('间距 d (mm)', 5.0, 300.0, 40.0, key='astro_ddg')
+            _f2g = reducer_focal_for(_fuse, _rtg, _ddg)
+            st.metric('所需减焦镜焦距 f₂', f'{_f2g:.0f} mm' if np.isfinite(_f2g) else '—')
+            st.metric('合成 F#', f'{_fc / epd:.2f}' if np.isfinite(_fc) and epd > 0 else '—')
+        st.caption('提示：间距 d 越大减焦越强；f₂ 正=会聚组（减焦），负=发散组（增倍镜方向）')
+
+    # ---- 7. 模拟星场（像差可视化）----
+    with st.expander('🌠 模拟星场（像差可视化）'):
+        st.caption('真实光线追迹：每颗星 = 该视场点列图（三波长 F/d/C 叠加）。'
+                   '中心圆点=球差/色差｜边缘彗星尾=彗差｜四角椭圆=像散｜星点彩边=横向色差')
+        sf1, sf2, sf3 = st.columns(3)
+        with sf1:
+            _smode = st.radio('模式', ['网格演示', '随机星空'], horizontal=True, key='astro_smode')
+            _sann = st.checkbox('标注 RMS (µm)', value=False, key='astro_sann')
+        with sf2:
+            _sn = st.slider('星数', 9, 81, 25, step=4, key='astro_sn')
+            _ss = st.slider('像差放大', 3, 60, 15, step=3, key='astro_ss')
+        with sf3:
+            _seed = st.number_input('随机种子', 1, 999, 42, key='astro_seed')
+            _sd = st.slider('离焦（像面偏移 µm）', -500, 500, 0, 50, key='astro_sd')
+        _sf_key = (('starfield', _smode, _sn, _ss, _seed, _sd, _sann) + _skey)
+        with st.spinner('追迹渲染中（网格 25 星约 2s）...'):
+            _sfig = _cache_fig(_sf_key, lambda: render_starfield(
+                specs, epd=epd, fields=fields_ui, wavelengths=wavs_ui,
+                mode='grid' if _smode == '网格演示' else 'random',
+                n_stars=int(_sn), scale=float(_ss), seed=int(_seed),
+                defocus_mm=float(_sd) / 1000.0, annotate=bool(_sann)))
+        if _sfig is not None:
+            _dl_png(_sfig, '下载星场', 'starfield.png')
+            st.pyplot(_sfig)
+        else:
+            st.warning('星场渲染失败（结构可能无效）')
+        if st.checkbox('🎞 离焦对比（5 帧：-400/-200/0/+200/+400 µm）', value=False,
+                       key='astro_sfcmp'):
+            _dzs = [-0.4, -0.2, 0.0, 0.2, 0.4]
+            cols = st.columns(5)
+            for ci, dz in enumerate(_dzs):
+                with cols[ci]:
+                    st.caption(f'{dz * 1000:+.0f} µm')
+                    with st.spinner(''):
+                        _cf = _cache_fig(
+                            ('starfield', 'cmp', ci, _smode, _sn, _ss, _seed) + _skey,
+                            lambda dz=dz: render_starfield(
+                                specs, epd=epd, fields=fields_ui, wavelengths=wavs_ui,
+                                mode='grid' if _smode == '网格演示' else 'random',
+                                n_stars=int(_sn), scale=float(_ss), seed=int(_seed),
+                                defocus_mm=dz, annotate=False))
+                    if _cf is not None:
+                        st.pyplot(_cf)
+        if st.button('🎯 测算最佳对焦位置（扫描 ±0.4mm）', use_container_width=True,
+                     key='astro_bf'):
+            with st.spinner('扫描中（21 步 × 4 星）...'):
+                _bz, _bc = best_focus_offset(specs, epd=epd, fields=fields_ui,
+                                             wavelengths=wavs_ui)
+                st.session_state.sf_bz = _bz
+        if 'sf_bz' in st.session_state and st.session_state.sf_bz is not None:
+            _bzv = float(st.session_state.sf_bz)
+            if abs(_bzv) <= 0.05:
+                st.success(f'🎯 最佳对焦 ≈ {_bzv * 1000:+.0f} µm——当前像面在最佳焦点附近')
+            else:
+                st.warning(f'🎯 最佳对焦 = {_bzv * 1000:+.0f} µm（相对当前像面；'
+                           '负=像面需前移）——请微调后焦后星点最小')
+
+    # ---- 8. 曝光模拟照片（单张 vs 叠加）----
+    with st.expander('📷 曝光模拟照片（单张 vs 叠加）'):
+        st.caption('像素级噪声模拟：每颗星真实追迹 RMS → 高斯 PSF；噪声 = 天光 + 读出 + 暗电流。'
+                   '叠加 N 张噪声降 √N、极限星等 +2.5log√N——暗星从噪声中浮现')
+        x1, x2, x3 = st.columns(3)
+        with x1:
+            _ex_t = st.number_input('单张曝光 (s)', 10.0, 1200.0, 120.0, step=10.0, key='astro_ext')
+            _ex_n = st.number_input('叠加张数', 1, 300, 20, step=1, key='astro_exn')
+        with x2:
+            _ex_sky = st.selectbox('天光', list(_SKY_MAG.keys()), key='astro_exsky')
+            _ex_qe = st.number_input('QE', 0.2, 0.95, 0.6, step=0.05, key='astro_exqe')
+        with x3:
+            _ex_zoom = st.radio('显示区域', ['整幅', '中心 3×'], horizontal=True, key='astro_exzoom')
+            _ex_seed = st.number_input('随机种子', 1, 999, 3, key='astro_exseed')
+        _ex_key = (('exposure', _ex_t, _ex_n, _ex_sky, _ex_qe, _ex_zoom, _ex_seed) + _skey)
+        with st.spinner('模拟曝光渲染中（约 2-4s）...'):
+            _exfig = _cache_fig(_ex_key, lambda: render_exposure_stars(
+                specs, epd=epd, fields=fields_ui, wavelengths=wavs_ui,
+                t_sec=float(_ex_t), n_stack=int(_ex_n),
+                sky_mag=_SKY_MAG[_ex_sky], qe=float(_ex_qe),
+                n_stars=80, seed=int(_ex_seed),
+                zoom=3 if _ex_zoom == '中心 3×' else 1))
+        if _exfig is not None:
+            _dl_png(_exfig, '下载曝光模拟', 'exposure.png')
+            st.pyplot(_exfig)
+        else:
+            st.warning('曝光模拟失败（结构可能无效）')
 
 _wl_txt = ' / '.join(f'{w:.4f}' for w, _ in wavs_ui)
 _fld_txt = ' / '.join(f'{y:.2f}°' for y, _ in fields_ui)

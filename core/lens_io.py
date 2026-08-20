@@ -167,6 +167,14 @@ def build_lens_from_specs(specs, epd=40.0, fields=(0.0, 2.0, 4.06, 5.8),
             if s['glass']:
                 nd, vd = _agf_params(s['glass'], float(s['nd']), float(s['vd']))
                 kwargs['material'] = AbbeMaterial(nd, vd, 'buchdahl')
+            # 非球面（v0.21）：conic + 偶次系数 → even_asphere（= Zemax EVENASPH）
+            conic = float(s.get('conic', 0.0) or 0.0)
+            coeffs = [float(c) for c in (s.get('coeffs') or []) if c is not None]
+            kwargs['conic'] = conic
+            if abs(conic) > 1e-9 or any(abs(c) > 1e-12 for c in coeffs):
+                kwargs['surface_type'] = 'even_asphere'
+                if coeffs:
+                    kwargs['coefficients'] = coeffs
             lens.surfaces.add(**kwargs)
         lens.surfaces.add(index=specs[-1]['idx'])
         lens.set_aperture(aperture_type='EPD', value=float(epd))
@@ -194,6 +202,15 @@ def build_lens_from_specs(specs, epd=40.0, fields=(0.0, 2.0, 4.06, 5.8),
 # ============================================================
 # 3. 规格 ↔ LDE 表格
 # ============================================================
+def _coeff_at(s, i):
+    """spec 的偶次非球面系数第 i 项（0=C1→ρ², 1=C2→ρ⁴=A4...），无则 NaN"""
+    cs = s.get('coeffs') or []
+    if i < len(cs) and cs[i] is not None:
+        v = float(cs[i])
+        return round(v, 9) if abs(v) > 1e-12 else np.nan
+    return np.nan
+
+
 def specs_to_df(specs):
     """规格 → 展示 DataFrame（Zemax LDE 风格列名）"""
     rows = []
@@ -208,6 +225,10 @@ def specs_to_df(specs):
             'ND': round(float(s['nd']), 5) if s['nd'] else np.nan,
             'VD': round(float(s['vd']), 3) if s['vd'] else np.nan,
             'Semi-Dia': round(float(s['semi']), 2) if np.isfinite(s['semi']) else np.nan,
+            'Conic': round(float(s.get('conic', 0.0) or 0.0), 4) if s['glass'] else np.nan,
+            'A4': _coeff_at(s, 1),
+            'A6': _coeff_at(s, 2),
+            'A8': _coeff_at(s, 3),
             '备注': '光阑' if s['is_stop'] else ('像面' if s['is_image'] else ''),
         })
     return pd.DataFrame(rows)
@@ -261,10 +282,32 @@ def df_to_specs(df):
         _sv = row.get('Surf', row.get('面号', i))
         if _sv is None or (isinstance(_sv, float) and not np.isfinite(_sv)):
             _sv = i
+        # 非球面（v0.21）：Conic + A4/A6/A8（Zemax 命名，ρ⁴/ρ⁶/ρ⁸）
+        conic = 0.0
+        try:
+            cv = float(row.get('Conic', np.nan))
+            if np.isfinite(cv):
+                conic = cv
+        except (TypeError, ValueError):
+            pass
+        a4, a6, a8 = (np.nan,) * 3
+        try:
+            a4 = float(row.get('A4', np.nan))
+            a6 = float(row.get('A6', np.nan))
+            a8 = float(row.get('A8', np.nan))
+        except (TypeError, ValueError):
+            pass
+        coeffs = []
+        if any(np.isfinite(v) for v in (a4, a6, a8)):
+            coeffs = [0.0,
+                      float(a4) if np.isfinite(a4) else 0.0,
+                      float(a6) if np.isfinite(a6) else 0.0,
+                      float(a8) if np.isfinite(a8) else 0.0]
         out.append({
             'idx': int(_sv),
             'R': R, 't': t, 'glass': glass, 'nd': nd, 'vd': vd,
             'semi': semi,
+            'conic': conic, 'coeffs': coeffs,
             'is_stop': i == 1, 'is_image': i == n - 1,
         })
     return out
@@ -312,8 +355,18 @@ def specs_to_zemax_text(specs, epd=40.0, name='design'):
         t = 'Infinity' if not np.isfinite(s['t']) else f'{s["t"]:.6g}'
         g = s['glass'] if s['glass'] else ''
         semi = f'{s["semi"]:.4g}' if np.isfinite(s['semi']) else '0'
-        line = f'{s["idx"]:<4d} STANDARD    {r:<12s} {t:<12s} {g:<10s} {semi}'
-        lines.append(line)
+        conic = float(s.get('conic', 0.0) or 0.0)
+        coeffs = [float(c) for c in (s.get('coeffs') or []) if c is not None]
+        if abs(conic) > 1e-9 or any(abs(c) > 1e-12 for c in coeffs):
+            # EVENASPH：面行 + 系数行（k + A2..A16 共 9 值；Zemax 打开后请核对参数顺序）
+            line = f'{s["idx"]:<4d} EVENASPH     {r:<12s} {t:<12s} {g:<10s} {semi}'
+            lines.append(line)
+            a = [conic] + [coeffs[i] if i < len(coeffs) else 0.0 for i in range(8)]
+            lines.append(f'{s["idx"]:<4d} EVENASPH     '
+                         + ' '.join(f'{v:.6g}' for v in a))
+        else:
+            line = f'{s["idx"]:<4d} STANDARD    {r:<12s} {t:<12s} {g:<10s} {semi}'
+            lines.append(line)
     lines.append('IMA  STANDARD    Infinity    0')
     return '\n'.join(lines)
 
