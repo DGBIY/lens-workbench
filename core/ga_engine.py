@@ -287,39 +287,39 @@ def run_ga_remote(engine='cpu', pop=2000, gens=200, seed=42, target_efl=200.0,
                             stderr=subprocess.STDOUT)
     t0 = time.time()
     last_n = 0
-    while proc.poll() is None:
+    try:
+        while proc.poll() is None:
+            if os.path.exists(hist_path):
+                with open(hist_path, encoding='utf-8') as _fh:
+                    rows = [l.strip().split(',') for l in _fh
+                            if l.strip() and not l.startswith('gen')]
+                if len(rows) > last_n:
+                    last_n = len(rows)
+                    if progress:
+                        progress(int(float(rows[-1][0])), float(rows[-1][1]))
+            if timeout and time.time() - t0 > timeout:
+                proc.kill()
+                raise TimeoutError(f'GA 超时（>{timeout}s）——日志见 {log_path}')
+            time.sleep(1.0)
+        if proc.returncode != 0 or not os.path.exists(best_out):
+            raise RuntimeError(f'GA 子进程失败（exit={proc.returncode}）——日志见 {log_path}')
+        with open(best_out, encoding='utf-8') as f:
+            d = json.load(f)
+        genes = np.array(d['types'] + d['rows'] + d['airs'], dtype=float)
+        hist = []
         if os.path.exists(hist_path):
             with open(hist_path, encoding='utf-8') as _fh:
                 rows = [l.strip().split(',') for l in _fh
                         if l.strip() and not l.startswith('gen')]
-            if len(rows) > last_n:
-                last_n = len(rows)
-                if progress:
-                    progress(int(float(rows[-1][0])), float(rows[-1][1]))
-        if timeout and time.time() - t0 > timeout:
-            proc.kill()
-            log_f.close()
-            raise TimeoutError(f'GA 超时（>{timeout}s）——日志见 {log_path}')
-        time.sleep(1.0)
-    if proc.returncode != 0 or not os.path.exists(best_out):
-        log_f.close()
-        raise RuntimeError(f'GA 子进程失败（exit={proc.returncode}）——日志见 {log_path}')
-    with open(best_out, encoding='utf-8') as f:
-        d = json.load(f)
-    genes = np.array(d['types'] + d['rows'] + d['airs'], dtype=float)
-    hist = []
-    if os.path.exists(hist_path):
-        with open(hist_path, encoding='utf-8') as _fh:
-            rows = [l.strip().split(',') for l in _fh
-                    if l.strip() and not l.startswith('gen')]
-        hist = [(int(float(r[0])), float(r[1])) for r in rows]
+            hist = [(int(float(r[0])), float(r[1])) for r in rows]
+    finally:
+        log_f.close()   # Copilot 审核 #326：3 处 close 收敛为 finally；日志保留供诊断
     # MiMo 审核 #10：正常路径清理临时文件（异常残留由下次启动的 os.remove 兜底）
     for p in (hist_path, best_out):
         try:
             os.remove(p)
         except OSError:
             pass
-    log_f.close()   # 日志文件保留（诊断价值），不随临时文件清理
     return genes, hist
 
 
