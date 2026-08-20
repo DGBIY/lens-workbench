@@ -312,29 +312,45 @@ with st.sidebar:
                 st.session_state.ga_seed_ctr = _seed_now
                 _hist = []
                 _bs = None
+                _ga_error = None
                 if _ga_eng.startswith('近轴'):
                     if int(_ga_ng) != 6:
                         st.error('近轴引擎固定 6 组基因——其他组数请用"内置 optiland"')
                     else:
-                        with st.spinner('近轴 GA 运行中（向量化，很快）...'):
-                            _genes, _hist = ga_engine.run_ga_remote(
-                                engine='gpu' if 'GPU' in _ga_eng else 'cpu',
-                                pop=int(_ga_pop), gens=int(_ga_gen), seed=_seed_now,
-                                target_efl=float(_ga_efl), progress=_prog)
-                        _bs = elite_to_specs(
-                            [(int(_genes[i]), int(_genes[6 + i])) for i in range(6)],
-                            [float(x) for x in _genes[12:17]])
+                        try:
+                            with st.spinner('近轴 GA 运行中（向量化，很快）...'):
+                                _genes, _hist = ga_engine.run_ga_remote(
+                                    engine='gpu' if 'GPU' in _ga_eng else 'cpu',
+                                    pop=int(_ga_pop), gens=int(_ga_gen), seed=_seed_now,
+                                    target_efl=float(_ga_efl), progress=_prog)
+                            _bs = elite_to_specs(
+                                [(int(_genes[i]), int(_genes[6 + i])) for i in range(6)],
+                                [float(x) for x in _genes[12:17]])
+                        except Exception as _e:
+                            _ga_error = _e
+                            _bs = None
+                            _hist = []
                 else:
-                    with st.spinner('内置 optiland GA 运行中（约 30-120s）...'):
-                        _bi, _bs, _hist = ga_engine.run_ga(
-                            n_groups=int(_ga_ng),
-                            merit=merit_from_preset(_ga_preset, float(_ga_efl)),
-                            epd=epd, fields=fields_ui, wavs=wavs_ui,
-                            pop=int(_ga_pop), gens=int(_ga_gen),
-                            seed_templates=list(_ga_seeds), back_focus=55.0,
-                            progress=_prog)
+                    try:
+                        with st.spinner('内置 optiland GA 运行中（约 30-120s）...'):
+                            _bi, _bs, _hist = ga_engine.run_ga(
+                                n_groups=int(_ga_ng),
+                                merit=merit_from_preset(_ga_preset, float(_ga_efl)),
+                                epd=epd, fields=fields_ui, wavs=wavs_ui,
+                                pop=int(_ga_pop), gens=int(_ga_gen),
+                                seed_templates=list(_ga_seeds), back_focus=55.0,
+                                progress=_prog)
+                    except Exception as _e:
+                        _ga_error = _e
+                        _bs = None
+                        _hist = []
                 _bar.progress(1.0, text='完成')
-                if _bs:
+                if _ga_error is not None:
+                    st.error(f'❌ GA 运行失败：{_ga_error}')
+                    if _ga_eng.startswith('近轴'):
+                        st.caption('🔍 子进程完整日志（保留最近一次，故障排查用）：'
+                                   f'`GA\\完整项目\\scripts\\_wb_log_{_seed_now}.txt`')
+                elif _bs:
                     if _ga_refine:
                         with st.spinner('局部精修（Nelder-Mead 快速）...'):
                             _nr, _hr, _b0, _a0 = optimize_local(
