@@ -156,8 +156,12 @@ def fitness(ind, epd, fields, wavs, merit, back_focus=55.0):
 
 # 部分随机结构会让 optiland 追迹挂起（引擎内部循环）——每次评估新建线程池 + 超时
 # 超时后 shutdown(wait=False) 丢弃挂起线程，避免阻塞后续评估
-# MiMo 审核 #2：线程创建 ~1ms vs 评估 ~0.5s（0.2% 可忽略）；共享池会因挂起线程排队
-# 导致后续全部退化 1e9（实测过），故保持每次新建——有意设计权衡，勿改回共享池
+# 评估隔离（v0.26.1 起为进程池）：optiland 对病态结构会陷入引擎内部循环（不返回），
+# 线程无法强制终止 → 挂起线程堆积抢占 CPU（实测 moo W3 权重 >10min 无进展）。
+# 进程池方案：max_workers=1 + spawn，超时 terminate 挂起进程 + 重建池 → 有界完成。
+# 历史（MiMo 审核 #2）：早期每次评估新建 ThreadPoolExecutor 是"有意权衡"
+# （共享池会因挂起线程排队导致全部退化 1e9），但线程本身无法被终止——缺陷仍在，
+# 故 v0.26.1 升级为进程池（可 terminate）。
 def _safe_fitness(ind, epd, fields, wavs, merit, back_focus=55.0, timeout=8.0):
     """评估 + 超时防护：进程池隔离，超时 terminate 挂起进程（线程无法终止 → 用进程）"""
     global _HUNG_COUNT
