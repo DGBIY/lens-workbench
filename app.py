@@ -23,6 +23,33 @@ import streamlit as st
 
 st.set_page_config(page_title='镜头设计工作台', layout='wide', page_icon='🔭')
 
+# ============ Zemax 风格 UI（CSS）：分析图窗口可拖拽缩放等 ============
+st.markdown("""
+<style>
+/* 分析图"窗口"：右下角可拖拽缩放（Zemax 窗口感） */
+[data-testid="stImage"] {
+    resize: both;
+    overflow: auto;
+    min-width: 320px;
+    min-height: 220px;
+    border: 1px solid #d0d7de;
+    border-radius: 8px;
+    background: #fbfdff;
+    padding: 6px;
+}
+[data-testid="stImage"] img { width: 100%; height: auto; }
+/* 指标卡片卡片化 */
+[data-testid="stMetric"] {
+    background: #f6f8fa; border: 1px solid #eaeef2;
+    border-radius: 8px; padding: 8px 12px;
+}
+/* 侧边栏分区标题紧凑化 */
+section[data-testid="stSidebar"] h3 { font-size: 14px; margin-top: 14px; }
+/* 分段控件下留白 */
+[data-testid="stSegmentedControl"] { margin-bottom: 8px; }
+</style>
+""", unsafe_allow_html=True)
+
 from core.lens_io import (elite_to_specs, load_elite_specs, specs_to_df,
                           df_to_specs, save_design, load_design, list_designs,
                           specs_to_zemax_text, auto_semi, set_back_focus,
@@ -112,6 +139,10 @@ with st.sidebar:
             st.session_state.epd = st.slider('EPD (mm)', 10.0, 80.0,
                                              float(st.session_state.epd), step=1.0,
                                              key='epd_slider')
+            st.session_state.fig_scale = st.slider(
+                '图窗口尺寸', 0.6, 1.6, float(st.session_state.get('fig_scale', 1.0)),
+                step=0.05, key='fig_scale_slider',
+                help='所有分析图窗口的缩放倍率（配合窗口右下角拖拽使用）')
             cur_bf = 55.0
             for _i in range(len(st.session_state.specs) - 2, 0, -1):
                 _s = st.session_state.specs[_i]
@@ -305,10 +336,12 @@ tab_work, tab_cmp, tab_ga = st.tabs(['🛠 设计', '📊 多精英对比', '�
 with tab_work:
     # ---- LDE 全宽 ----
     st.subheader('📋 Lens Data Editor')
+    lde_h = st.slider('表格高度 (px)', 320, 900, 560, 20, key='lde_h',
+                      help='LDE 表格窗口高度（可调）')
     cur_df = specs_to_df(st.session_state.specs)
     edited = st.data_editor(
         cur_df, num_rows='dynamic', key='lde_table', hide_index=True,
-        use_container_width=True,
+        use_container_width=True, height=lde_h,
         disabled={'Surf': True, '备注': True,
                   'Radius': [0, len(cur_df) - 1],
                   'Thick': [0, len(cur_df) - 1],
@@ -437,10 +470,10 @@ with tab_work:
     # ---- 分析视图（segmented 窗口切换，缓存图避免重算）----
     st.divider()
     if hasattr(st, 'segmented_control'):
-        view = st.segmented_control('分析视图', ['2D Layout', '3D', 'Spot', '像差分析'],
+        view = st.segmented_control('分析视图', ['2D Layout', '3D', 'Spot', '像差分析', '总览'],
                                     default='2D Layout', selection_mode='single')
     else:
-        view = st.radio('分析视图', ['2D Layout', '3D', 'Spot', '像差分析'], horizontal=True)
+        view = st.radio('分析视图', ['2D Layout', '3D', 'Spot', '像差分析', '总览'], horizontal=True)
 
     def _dl_png(fig, label, fname):
         """分析图下载 PNG"""
@@ -451,11 +484,26 @@ with tab_work:
         st.download_button(f'⬇ {label}', _buf, file_name=fname, mime='image/png')
 
     def _cache_fig(key, maker):
-        """按结构+参数缓存图：切换视图/重复交互不重算，结构变化自动失效"""
+        """按结构+参数缓存图：切换视图/重复交互不重算，结构变化自动失效
+        返回前按全局"图窗口尺寸"滑块缩放（原始尺寸记录在缓存，缩放不累积）"""
         if st.session_state.get('fig_cache_key') != key:
             st.session_state.fig_cache_key = key
             st.session_state.fig_cache_val = maker()
-        return st.session_state.fig_cache_val
+            st.session_state.fig_cache_size = None
+        fig = st.session_state.fig_cache_val
+        if fig is not None:
+            try:
+                _fig0 = fig[0] if isinstance(fig, tuple) else fig
+                if st.session_state.get('fig_cache_size') is None:
+                    st.session_state.fig_cache_size = _fig0.get_size_inches()
+                _w, _h = st.session_state.fig_cache_size
+                _s = float(st.session_state.get('fig_scale', 1.0))
+                if abs(_s - 1.0) > 1e-3:
+                    _fig0.set_size_inches(_w * _s, _h * _s)
+                    _fig0.tight_layout()
+            except Exception:
+                pass
+        return fig
 
     _skey = (tuple((s['idx'], s['R'], s['t'], s['glass'], s['semi']) for s in specs),
              epd, tuple(fields_ui), tuple(wavs_ui))
@@ -487,6 +535,39 @@ with tab_work:
             st.dataframe(rdf, use_container_width=True, hide_index=True)
         else:
             st.warning('点阵图追迹失败（结构可能无效）')
+    elif view == '总览':
+        st.subheader('🪟 总览（2×2 多窗口 · Zemax 平铺风格）')
+        st.caption('四个分析窗口并行平铺；每个窗口右下角可拖拽缩放；"图窗口尺寸"滑块整体缩放')
+        o1, o2 = st.columns(2)
+        with o1:
+            with st.spinner(''):
+                _fo2 = _cache_fig(('2d', _skey), lambda: plot_layout(
+                    specs, epd=epd, fields=fields_ui, wavelengths=wavs_ui))
+            if _fo2 is not None:
+                st.caption('🔭 2D Layout')
+                st.pyplot(_fo2)
+        with o2:
+            with st.spinner(''):
+                _fos, _rms_o = _cache_fig(('spot', _skey), lambda: compute_spot(
+                    specs, epd=epd, fields=fields_ui, wavelengths=wavs_ui))
+            if _fos is not None:
+                st.caption('⭕ Spot Diagram')
+                st.pyplot(_fos)
+        o3, o4 = st.columns(2)
+        with o3:
+            with st.spinner(''):
+                _fom = _cache_fig(('ana', 'mtf', _skey), lambda: analysis_fig(
+                    specs, kind='mtf', epd=epd, fields=fields_ui, wavelengths=wavs_ui))
+            if _fom is not None:
+                st.caption('📈 MTF vs 空间频率')
+                st.pyplot(_fom)
+        with o4:
+            with st.spinner(''):
+                _fof = _cache_fig(('ana', 'field_curvature', _skey), lambda: analysis_fig(
+                    specs, kind='field_curvature', epd=epd, fields=fields_ui, wavelengths=wavs_ui))
+            if _fof is not None:
+                st.caption('📉 场曲 Field Curvature')
+                st.pyplot(_fof)
     else:
         st.subheader('📉 像差分析')
         ak = st.selectbox('分析类型', list(KINDS.keys()), format_func=lambda k: KINDS[k])
