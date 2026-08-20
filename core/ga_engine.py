@@ -9,12 +9,14 @@
 - Zemax 联动保留：UI 引擎开关切换（'zemax' 走 run_control）
 """
 import json
+import multiprocessing as mp
 import os
 import random
 import subprocess
 import sys
+import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as _Timeout
+from concurrent.futures import TimeoutError as _Timeout
 
 import numpy as np
 
@@ -86,10 +88,66 @@ def seed_from_template(key, rng, n_groups):
     return {'pairs': pairs, 'airs': airs}
 
 
+# ===== 追迹挂起防护（v0.26.1，moo W3 卡死根因修复）=====
+# optiland 对病态结构会陷入引擎内部循环（不返回）——线程无法强制终止 → 挂起线程
+# 堆积抢占 CPU 导致评估无限变慢（实测 moo W3 场景 >10min 无进展）。
+# 方案：评估进程池（max_workers=1）+ 超时 terminate 挂起进程 + 重建池 → 有界完成
+# 辅助：_specs_sane 源头拒绝数值异常/极端球面结构（减少挂起触发）
+_HUNG_LOCK = threading.Lock()
+_HUNG_COUNT = 0
+_EVAL_POOL = None
+
+
+def _get_eval_pool():
+    """惰性创建评估进程池（Windows spawn，首次 ~3s）"""
+    global _EVAL_POOL
+    if _EVAL_POOL is None:
+        from concurrent.futures import ProcessPoolExecutor
+        _EVAL_POOL = ProcessPoolExecutor(max_workers=1,
+                                         mp_context=mp.get_context('spawn'))
+    return _EVAL_POOL
+
+
+def _reset_eval_pool():
+    """终止挂起进程并重建池（下次评估惰性重建）"""
+    global _EVAL_POOL
+    p = _EVAL_POOL
+    _EVAL_POOL = None
+    if p is not None:
+        try:
+            for proc in list(getattr(p, '_processes', {}).values()):
+                proc.terminate()
+        except Exception:
+            pass
+        try:
+            p.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
+
+
+def _specs_sane(specs):
+    """结构数值合理性快速检查：R/t/semi 量级 + 极端球面拒绝
+    数值正常但极端的结构（强曲率球面）会让 optiland 追迹极慢甚至死循环——
+    源头拒绝：|R|<5mm（强球面）、semi/|R|>0.8（sag 接近半口径，数值病态）"""
+    for s in specs[2:-1]:
+        r = float(s['R'])
+        t = float(s['t'])
+        semi = float(s['semi']) if s.get('semi') is not None and np.isfinite(s.get('semi', 0.0)) else 0.0
+        if not (np.isfinite(r) and np.isfinite(t)):
+            return False
+        if abs(r) < 5.0 or abs(r) > 1e6:
+            return False
+        if t < 0.0 or t > 300.0:
+            return False
+        if semi > 0.0 and abs(r) < 1e6 and semi / abs(r) > 0.8:
+            return False
+    return True
+
+
 def fitness(ind, epd, fields, wavs, merit, back_focus=55.0):
     specs = elite_to_specs(ind['pairs'], ind['airs'], back_focus)
-    if specs is None:
-        return 1e9
+    if specs is None or not _specs_sane(specs):
+        return 1e9  # 结构无效/数值异常 → 快速判劣（源头避免追迹挂起）
     ops = compute_operands(specs, epd, fields, wavs)
     if not ops:
         return 1e9
@@ -101,12 +159,17 @@ def fitness(ind, epd, fields, wavs, merit, back_focus=55.0):
 # MiMo 审核 #2：线程创建 ~1ms vs 评估 ~0.5s（0.2% 可忽略）；共享池会因挂起线程排队
 # 导致后续全部退化 1e9（实测过），故保持每次新建——有意设计权衡，勿改回共享池
 def _safe_fitness(ind, epd, fields, wavs, merit, back_focus=55.0, timeout=8.0):
-    ex = ThreadPoolExecutor(max_workers=1)
-    fut = ex.submit(fitness, ind, epd, fields, wavs, merit, back_focus)
+    """评估 + 超时防护：进程池隔离，超时 terminate 挂起进程（线程无法终止 → 用进程）"""
+    global _HUNG_COUNT
+    with _HUNG_LOCK:
+        pool = _get_eval_pool()
+        fut = pool.submit(fitness, ind, epd, fields, wavs, merit, back_focus)
     try:
         return fut.result(timeout=timeout)
     except _Timeout:
-        ex.shutdown(wait=False)
+        with _HUNG_LOCK:
+            _HUNG_COUNT += 1
+            _reset_eval_pool()   # 挂起进程 terminate + 下次重建（防堆积）
         return 1e9  # 超时个体判劣淘汰
 
 
