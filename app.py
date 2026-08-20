@@ -281,16 +281,25 @@ with st.sidebar:
                                            format_func=lambda k: TEMPLATES[k]['label'],
                                            key='ga_seeds')
             with gg3:
-                _ga_mr = st.slider('变异率', 0.05, 0.9, 0.3, 0.05, key='ga_mr')
-                st.caption('预估耗时 ≈ 种群×代数×0.5s（真实追迹）；'
-                           '随机结构偶发追迹挂起会自动超时淘汰')
+                _ga_eng = st.radio('评估引擎',
+                                   ['近轴 GA · CPU 向量化（6 组）',
+                                    '近轴 GA · GPU（6 组）',
+                                    '内置 optiland（任意组数）'],
+                                   index=0, key='ga_eng',
+                                   help='近轴引擎复用完整项目 ga_fast（KNN/重启/爬坡/去重，'
+                                        'CPU 向量化 500×20 代 ≈ 1s；GPU 需 N 卡 + python_env）')
+                if int(_ga_ng) != 6 and _ga_eng.startswith('近轴'):
+                    st.warning('⚠️ 近轴引擎固定 6 组基因——其他组数请用"内置 optiland"')
+                _ga_mr = st.slider('变异率（内置模式）', 0.05, 0.9, 0.3, 0.05, key='ga_mr')
+                _ga_refine = st.checkbox('跑完自动局部精修（Nelder-Mead 快速）',
+                                         value=True, key='ga_refine')
             with st.expander('📋 评价函数明细（操作数/目标/权重）'):
                 _gd = pd.DataFrame([{'操作数': op, '目标': t, '权重': w}
                                     for op, t, w in MERIT_PRESETS[_ga_preset]])
                 st.dataframe(_gd, use_container_width=True, hide_index=True)
                 st.caption('MFE = √(Σw·Δ²/Σw)（Zemax 惯例）；12 种操作数可换预设，'
                            '或改权重/目标后重跑')
-            if st.button('▶ 启动 optiland GA（跑完自动回填 LDE + 星场验证）',
+            if st.button('▶ 启动 GA（跑完自动回填 LDE + 星场验证）',
                          use_container_width=True, key='ga_go'):
                 from core import ga_engine
                 _bar = st.progress(0.0, text='GA 进化中...')
@@ -299,40 +308,63 @@ with st.sidebar:
                     _bar.progress(min(1.0, g / max(1, int(_ga_gen))),
                                   text=f'第 {g}/{int(_ga_gen)} 代 · best {f:.3f}')
 
-                with st.spinner('optiland GA 运行中（约 30-120s）...'):
-                    _bi, _bs, _hist = ga_engine.run_ga(
-                        n_groups=int(_ga_ng),
-                        merit=merit_from_preset(_ga_preset, float(_ga_efl)),
-                        epd=epd, fields=fields_ui, wavs=wavs_ui,
-                        pop=int(_ga_pop), gens=int(_ga_gen),
-                        seed_templates=list(_ga_seeds), back_focus=55.0,
-                        progress=_prog)
+                _seed_now = int(st.session_state.get('ga_seed_ctr', 0)) + 1
+                st.session_state.ga_seed_ctr = _seed_now
+                _hist = []
+                _bs = None
+                if _ga_eng.startswith('近轴'):
+                    if int(_ga_ng) != 6:
+                        st.error('近轴引擎固定 6 组基因——其他组数请用"内置 optiland"')
+                    else:
+                        with st.spinner('近轴 GA 运行中（向量化，很快）...'):
+                            _genes, _hist = ga_engine.run_ga_remote(
+                                engine='gpu' if 'GPU' in _ga_eng else 'cpu',
+                                pop=int(_ga_pop), gens=int(_ga_gen), seed=_seed_now,
+                                target_efl=float(_ga_efl), progress=_prog)
+                        _bs = elite_to_specs(
+                            [(int(_genes[i]), int(_genes[6 + i])) for i in range(6)],
+                            [float(x) for x in _genes[12:17]])
+                else:
+                    with st.spinner('内置 optiland GA 运行中（约 30-120s）...'):
+                        _bi, _bs, _hist = ga_engine.run_ga(
+                            n_groups=int(_ga_ng),
+                            merit=merit_from_preset(_ga_preset, float(_ga_efl)),
+                            epd=epd, fields=fields_ui, wavs=wavs_ui,
+                            pop=int(_ga_pop), gens=int(_ga_gen),
+                            seed_templates=list(_ga_seeds), back_focus=55.0,
+                            progress=_prog)
                 _bar.progress(1.0, text='完成')
                 if _bs:
+                    if _ga_refine:
+                        with st.spinner('局部精修（Nelder-Mead 快速）...'):
+                            _nr, _hr, _b0, _a0 = optimize_local(
+                                _bs, epd=epd, fields=fields_ui,
+                                wavelengths=wavs_ui, include_rsce=False)
+                            if _a0 < _b0:
+                                _bs = _nr
+                                st.caption(f'✅ 精修改善 MFE {_b0:.4f} → {_a0:.4f}')
                     st.session_state.pop('lde_table', None)
                     st.session_state.pop('bf', None)
                     st.session_state.specs = _apply_stop(_bs)
                     st.session_state.epd = epd
-                    st.session_state.src_label = (f'GA best（{int(_ga_gen)} 代 · '
-                                                  f'{_ga_preset}）')
-                    st.session_state.msg = ('ok', f'GA 完成：best MFE {_hist[-1][1]:.3f}，'
+                    st.session_state.src_label = f'GA best（{_ga_eng.split("（")[0]}）'
+                    st.session_state.msg = ('ok', f'GA 完成（best {_hist[-1][1]:.3f}），'
                                            '已自动回填 LDE')
                     _gm = evaluate_specs(_bs, epd=epd, fields=fields_ui,
                                          wavelengths=wavs_ui)
                     st.success(f'✅ 回填：EFFL {_gm["efl"]:.1f} | AXCL '
-                               f'{_gm["axcl"]:+.3f} | RSCE {_gm["rsce_um"]:.0f}µm'
-                               f' | MFE {_hist[-1][1]:.3f}')
+                               f'{_gm["axcl"]:+.3f} | RSCE {_gm["rsce_um"]:.0f}µm')
                     with st.spinner('渲染星场验证...'):
                         _sf = render_starfield(_bs, epd=epd, fields=fields_ui,
                                                wavelengths=wavs_ui, mode='grid',
                                                n_stars=25, scale=15.0, annotate=True)
                     if _sf is not None:
                         st.pyplot(_sf)
-                        st.caption('↑ GA 结果星场验证——中心圆点/边缘彗差一目了然，'
-                                   '不满意可改预设/种子重跑')
-                    st.line_chart(pd.DataFrame(
-                        {'gen': [h[0] for h in _hist],
-                         'best_mfe': [h[1] for h in _hist]}).set_index('gen'))
+                        st.caption('↑ GA 结果星场验证——不满意可改引擎/预设/种子重跑')
+                    if _hist:
+                        st.line_chart(pd.DataFrame(
+                            {'gen': [h[0] for h in _hist],
+                             'best_mfe': [h[1] for h in _hist]}).set_index('gen'))
                 else:
                     st.error('GA 失败（无有效个体）——检查镜片库或减小组数')
 

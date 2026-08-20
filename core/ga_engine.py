@@ -8,9 +8,12 @@
 - 日志：ga_history.csv（gen,best_mfe）兼容现有收敛曲线图表
 - Zemax 联动保留：UI 引擎开关切换（'zemax' 走 run_control）
 """
+import json
 import os
 import random
+import subprocess
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as _Timeout
 
 import numpy as np
@@ -180,6 +183,60 @@ def run_ga(n_groups=6, merit=None, epd=40.0, fields=(0.0, 2.0, 4.06, 5.8),
         pop_inds = nxt[:pop]
     best_specs = elite_to_specs(best_ind['pairs'], best_ind['airs'], back_focus)
     return best_ind, best_specs, hist
+
+
+def run_ga_remote(engine='cpu', pop=2000, gens=200, seed=42, target_efl=200.0,
+                  back_focus=55.0, log_every=50, timeout=3600, progress=None):
+    """子进程调用完整项目近轴 GA（ga_workbench.py，固定 6 组基因）
+    engine: 'cpu' 向量化 / 'gpu' CUDA（需 GA_PROJECT_ROOT + python_env + N 卡）
+    复用成熟引擎（ga_fast：KNN 突变/重启/爬坡/去重）→ (best_genes(17,), history)
+    子进程隔离：避免 config 模块名冲突；挂起可 kill；进度轮询 ga_history.csv
+    """
+    import config as _cfg
+    root = _cfg.GA_PROJECT_ROOT
+    if not root:
+        raise RuntimeError('未配置 GA_PROJECT_ROOT（完整项目）')
+    script = os.path.join(root, 'scripts', 'ga_workbench.py')
+    py = os.path.join(root, 'python_env', 'python.exe')
+    if not (os.path.exists(script) and os.path.exists(py)):
+        raise RuntimeError('缺少 ga_workbench.py 或 python_env')
+    hist_path = os.path.join(root, 'scripts', f'_wb_hist_{seed}.csv')
+    best_out = os.path.join(root, 'scripts', f'_wb_best_{seed}.json')
+    for p in (hist_path, best_out):
+        if os.path.exists(p):
+            os.remove(p)
+    argv = [py, '-u', script, '--pop', str(pop), '--gens', str(gens),
+            '--seed', str(seed), '--engine', engine,
+            '--target-efl', str(target_efl), '--back-focus', str(back_focus),
+            '--log-every', str(log_every),
+            '--history-out', hist_path, '--best-out', best_out]
+    proc = subprocess.Popen(argv, cwd=root, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL)
+    t0 = time.time()
+    last_n = 0
+    while proc.poll() is None:
+        if os.path.exists(hist_path):
+            rows = [l.strip().split(',') for l in open(hist_path, encoding='utf-8')
+                    if l.strip() and not l.startswith('gen')]
+            if len(rows) > last_n:
+                last_n = len(rows)
+                if progress:
+                    progress(int(float(rows[-1][0])), float(rows[-1][1]))
+        if timeout and time.time() - t0 > timeout:
+            proc.kill()
+            raise TimeoutError(f'GA 超时（>{timeout}s）')
+        time.sleep(1.0)
+    if proc.returncode != 0 or not os.path.exists(best_out):
+        raise RuntimeError(f'GA 子进程失败（exit={proc.returncode}）')
+    with open(best_out, encoding='utf-8') as f:
+        d = json.load(f)
+    genes = np.array(d['types'] + d['rows'] + d['airs'], dtype=float)
+    hist = []
+    if os.path.exists(hist_path):
+        rows = [l.strip().split(',') for l in open(hist_path, encoding='utf-8')
+                if l.strip() and not l.startswith('gen')]
+        hist = [(int(float(r[0])), float(r[1])) for r in rows]
+    return genes, hist
 
 
 if __name__ == '__main__':
