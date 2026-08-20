@@ -77,6 +77,8 @@ def compute_operands(specs, epd=40.0, fields=(0.0, 2.0, 4.06, 5.8),
         out['RSCE'] = rsc_mm
         try:
             d_ = Distortion(lens)
+            # MiMo 审核 #7：optiland Distortion.data 单位 = %（实测 0.0008 ≈ 0.0008%，
+            # 对称 Petzval 结构畸变极小属正常）
             out['DIST'] = float(np.max(np.abs(np.asarray(d_.data))))
         except Exception:
             out['DIST'] = float('nan')
@@ -89,7 +91,8 @@ def compute_operands(specs, epd=40.0, fields=(0.0, 2.0, 4.06, 5.8),
                 out['WFE'] = float('nan')
         # MTF 高斯近似：MTF(f) = exp(-2π²σ²f²)，σ=RSCE(mm)，f=30 lp/mm
         out['MTF'] = float(np.exp(-2 * np.pi ** 2 * rsc_mm ** 2 * 900.0))
-        # THF 近似：离焦 ±2λF#² 处 RMS（几何离焦圆叠加）
+        # THF 近似（MiMo 审核 #9 已标注）：离焦 ±2λF#² 处 RMS ≈ 几何离焦圆叠加；
+        # 精确值需透过焦 Spot 分析（慢），作为工程近似操作数使用
         fno = epd / out['EFFL'] if out['EFFL'] > 0 else 5.0
         dz = 2 * 0.00055 * fno * fno
         out['THF'] = float(np.sqrt(rsc_mm ** 2 + (dz / (2 * fno)) ** 2))
@@ -102,7 +105,8 @@ def compute_operands(specs, epd=40.0, fields=(0.0, 2.0, 4.06, 5.8),
 
 
 def merit_value(ops, merit):
-    """MFE = sqrt(Σ w·Δ² / Σ w)；任一操作数缺失/无效 → 1e9"""
+    """MFE = sqrt(Σ w·Δ² / Σ w)；任一操作数缺失/无效 → 1e9
+    MiMo 审核 #11：固定 1e9 判劣——任何真实 MFE（<10）都远小于它，动态惩罚无增益"""
     s = 0.0
     wsum = 0.0
     for m in merit:

@@ -98,6 +98,8 @@ def fitness(ind, epd, fields, wavs, merit, back_focus=55.0):
 
 # 部分随机结构会让 optiland 追迹挂起（引擎内部循环）——每次评估新建线程池 + 超时
 # 超时后 shutdown(wait=False) 丢弃挂起线程，避免阻塞后续评估
+# MiMo 审核 #2：线程创建 ~1ms vs 评估 ~0.5s（0.2% 可忽略）；共享池会因挂起线程排队
+# 导致后续全部退化 1e9（实测过），故保持每次新建——有意设计权衡，勿改回共享池
 def _safe_fitness(ind, epd, fields, wavs, merit, back_focus=55.0, timeout=8.0):
     ex = ThreadPoolExecutor(max_workers=1)
     fut = ex.submit(fitness, ind, epd, fields, wavs, merit, back_focus)
@@ -125,7 +127,8 @@ def mutate(ind, rng, mr=0.3):
             out['pairs'][i] = m
     if out['airs'] and rng.random() < mr:
         i = rng.randrange(len(out['airs']))
-        out['airs'][i] = min(50.0, max(3.0, out['airs'][i] * rng.uniform(0.8, 1.2)))
+        out['airs'][i] = min(50.0, max(2.0, out['airs'][i] * rng.uniform(0.8, 1.2)))
+        # MiMo 审核 #4：下限 2.0mm（与完整项目 ga_fast 一致；3mm 过严限制搜索空间）
     return out
 
 
@@ -236,6 +239,12 @@ def run_ga_remote(engine='cpu', pop=2000, gens=200, seed=42, target_efl=200.0,
         rows = [l.strip().split(',') for l in open(hist_path, encoding='utf-8')
                 if l.strip() and not l.startswith('gen')]
         hist = [(int(float(r[0])), float(r[1])) for r in rows]
+    # MiMo 审核 #10：正常路径清理临时文件（异常残留由下次启动的 os.remove 兜底）
+    for p in (hist_path, best_out):
+        try:
+            os.remove(p)
+        except OSError:
+            pass
     return genes, hist
 
 
