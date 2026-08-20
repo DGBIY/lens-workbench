@@ -17,3 +17,7 @@ data/samples/*
 .panel_running
 .DS_Store
 Thumbs.db
+
+# 主题配置纳入版本库（v0.26.4）
+!.streamlit/
+!.streamlit/config.toml

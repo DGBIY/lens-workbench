@@ -1,0 +1,7 @@
+# Streamlit 主题配置（v0.26.4：统一深色主题，与图表/星场深色背景一致）
+[theme]
+base = "dark"
+primaryColor = "#4da6ff"
+backgroundColor = "#0e1117"
+secondaryBackgroundColor = "#1a1d24"
+textColor = "#e8e8e8"
