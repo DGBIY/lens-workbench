@@ -361,6 +361,13 @@ with st.sidebar:
                     if _sf is not None:
                         st.pyplot(_sf)
                         st.caption('↑ GA 结果星场验证——不满意可改引擎/预设/种子重跑')
+                    with st.spinner('渲染 2D 布局图...'):
+                        from core.layout import render_layout
+                        _ly = render_layout(_bs, epd=epd, fields=fields_ui,
+                                            efl=float(_ga_efl))
+                    if _ly is not None:
+                        st.pyplot(_ly)
+                        st.caption('↑ 2D 布局图（镜片结构 + 近轴光线，F/# 与 EFL 标注）')
                     if _hist:
                         st.line_chart(pd.DataFrame(
                             {'gen': [h[0] for h in _hist],
@@ -1065,13 +1072,28 @@ with tab_astro:
         with sf3:
             _seed = st.number_input('随机种子', 1, 999, 42, key='astro_seed')
             _sd = st.slider('离焦（像面偏移 µm）', -500, 500, 0, 50, key='astro_sd')
-        _sf_key = (('starfield', _smode, _sn, _ss, _seed, _sd, _sann) + _skey)
+        _csv_up = st.file_uploader('导入真实星表 CSV（可选：覆盖模式。列 name,ra,dec,mag，'
+                                   'RA/Dec 用度；超 5.8° 视场的星自动剔除）',
+                                   type=['csv'], key='astro_csv')
+        _stars_imp = None
+        if _csv_up is not None:
+            import os as _os, tempfile
+            _tmp = _os.path.join(tempfile.gettempdir(), 'real_stars_import.csv')
+            with open(_tmp, 'wb') as _f:
+                _f.write(_csv_up.getvalue())
+            from core.starfield import _stars_from_csv
+            _stars_imp = _stars_from_csv(_tmp)
+            if not _stars_imp:
+                st.warning('CSV 无有效星点（检查格式或视场范围）')
+        _sf_key = (('starfield', _smode, _sn, _ss, _seed, _sd, _sann, bool(_stars_imp)) + _skey)
         with st.spinner('追迹渲染中（网格 25 星约 2s）...'):
             _sfig = _cache_fig(_sf_key, lambda: render_starfield(
                 specs, epd=epd, fields=fields_ui, wavelengths=wavs_ui,
-                mode='grid' if _smode == '网格演示' else 'random',
+                mode=('grid' if _smode == '网格演示' else
+                      'real' if _smode == '真实星图（猎户座 M42）' else 'random'),
                 n_stars=int(_sn), scale=float(_ss), seed=int(_seed),
-                defocus_mm=float(_sd) / 1000.0, annotate=bool(_sann)))
+                defocus_mm=float(_sd) / 1000.0, annotate=bool(_sann),
+                stars=_stars_imp))
         if _sfig is not None:
             _dl_png(_sfig, '下载星场', 'starfield.png')
             st.pyplot(_sfig)

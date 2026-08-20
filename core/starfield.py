@@ -83,6 +83,71 @@ def _gen_random(n, seed=42):
              float(rng.uniform(8.0, 17.0))) for i in range(n)]
 
 
+# ============================================================
+# 真实星图（v0.26）：猎户座 M42 区域（公开星表数据，RA/Dec 度 + 视星等）
+# ============================================================
+REAL_ORION = [
+    # (名称, RA(度), Dec(度), 星等)
+    ('θ¹ Ori / M42', 83.8167, -5.3897, 4.00),
+    ('θ² Ori', 83.8458, -5.4158, 5.08),
+    ('ι Ori', 83.8583, -5.9100, 2.75),
+    ('η Ori', 81.1192, -2.3989, 3.35),
+    ('τ Ori', 79.4000, -6.8444, 3.59),
+    ('σ Ori', 84.6833, -2.6000, 3.80),
+    ('Alnitak / 参宿一 (ζ Ori)', 85.1896, -1.9428, 1.77),
+    ('Alnilam / 参宿二 (ε Ori)', 84.0533, -1.2019, 1.69),
+    ('Mintaka / 参宿三 (δ Ori)', 83.0017, -0.2992, 2.23),
+    ('Saiph / 参宿六 (κ Ori)', 86.9392, -9.6697, 2.06),
+    ('Rigel / 参宿七 (β Ori)', 78.6346, -8.2017, 0.13),
+]
+ORION_CENTER = (83.8167, -5.3897)   # M42 为光轴中心
+MAX_FIELD_DEG = 5.8                  # 全画幅半视场角
+
+
+def _radec_to_field(ra, dec, center=ORION_CENTER, max_field=MAX_FIELD_DEG):
+    """RA/Dec（度）→ 归一化视场坐标 (Hx, Hy)；超 1.2 视场返回 None"""
+    dra = (ra - center[0]) * np.cos(np.radians(dec))
+    ddec = dec - center[1]
+    hx = dra / max_field
+    hy = ddec / max_field
+    if abs(hx) > 1.2 or abs(hy) > 1.2:
+        return None
+    return float(hx), float(hy)
+
+
+def _gen_real(seed=7):
+    """真实星图：猎户座 M42 区域亮星 → [(Hx, Hy, mag)]"""
+    out = []
+    for _name, ra, dec, mag in REAL_ORION:
+        f = _radec_to_field(ra, dec)
+        if f is not None:
+            out.append((f[0], f[1], float(mag)))
+    return out
+
+
+def _stars_from_csv(path, center=ORION_CENTER, max_field=MAX_FIELD_DEG):
+    """导入真实星表 CSV（表头: name,ra,dec,mag；ra/dec 单位为度）
+    行解析容错：跳过缺列/非数值行；返回 [(Hx, Hy, mag), ...]"""
+    out = []
+    with open(path, encoding='utf-8') as f:
+        for ln in f:
+            ln = ln.strip()
+            if not ln or ln.lower().startswith('name'):
+                continue
+            parts = ln.replace(',', ' ').split()
+            if len(parts) < 3:
+                continue
+            try:
+                ra = float(parts[-3]); dec = float(parts[-2])
+                mag = float(parts[-1]) if len(parts) >= 3 else 12.0
+            except ValueError:
+                continue
+            fc = _radec_to_field(ra, dec, center, max_field)
+            if fc is not None:
+                out.append((fc[0], fc[1], mag))
+    return out
+
+
 def _build(specs, epd, fields, wavelengths):
     if wavelengths is None:
         wavelengths = [(w, 1.0) for w, _ in _WL]
@@ -92,9 +157,11 @@ def _build(specs, epd, fields, wavelengths):
 
 def render_starfield(specs, epd=40.0, fields=None, wavelengths=None,
                      mode='grid', n_stars=25, scale=12.0, seed=42,
-                     defocus_mm=0.0, annotate=False, figsize=(12, 8)):
+                     defocus_mm=0.0, annotate=False, figsize=(12, 8),
+                     stars=None):
     """渲染模拟星场 → matplotlib fig
-    mode: 'grid' 网格演示 / 'random' 随机星空
+    mode: 'grid' 网格演示 / 'random' 随机星空 / 'real' 真实星图（猎户座 M42）
+    stars: 外部星点列表 [(Hx, Hy, mag)]（真实星表导入优先于 mode）
     scale: 像差形态放大倍数（落点相对 d 波长质心的偏移 ×scale）
     defocus_mm: 像面轴向偏移（mm，正=远离镜头）
     annotate: 每颗星标注 RMS（µm）
@@ -104,7 +171,14 @@ def render_starfield(specs, epd=40.0, fields=None, wavelengths=None,
         return None
     fig, ax = plt.subplots(figsize=figsize, facecolor='#05070d')
     ax.set_facecolor('#05070d')
-    stars = _gen_grid(int(round(n_stars ** 0.5))) if mode == 'grid' else _gen_random(n_stars, seed)
+    if stars is not None:
+        pass  # 外部导入星点优先
+    elif mode == 'grid':
+        stars = _gen_grid(int(round(n_stars ** 0.5)))
+    elif mode == 'real':
+        stars = _gen_real(seed)
+    else:
+        stars = _gen_random(n_stars, seed)
     dist = create_distribution('hexapolar')
     dist.generate_points(_RINGS)
     z_img = None
@@ -147,7 +221,7 @@ def render_starfield(specs, epd=40.0, fields=None, wavelengths=None,
     ax.set_xlabel('像面 X（mm × 像差放大）', color='#999')
     ax.set_ylabel('像面 Y（mm × 像差放大）', color='#999')
     dz_txt = f' · 离焦 {defocus_mm * 1000:+.0f}μm' if abs(defocus_mm) > 1e-9 else ''
-    ax.set_title(f'模拟星场（{("网格演示" if mode == "grid" else "随机星空")}'
+    ax.set_title(f'模拟星场（{("网格演示" if mode == "grid" else "真实星图（猎户座 M42）" if mode == "real" else "随机星空")}'
                  f' · F/d/C 三波长 · 像差放大 ×{scale:.0f}{dz_txt}）', color='white')
     for sp in ('top', 'right', 'left', 'bottom'):
         ax.spines[sp].set_color('#333333')
