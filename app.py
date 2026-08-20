@@ -75,6 +75,7 @@ from core.astro_tools import (pixel_scale, fov, diffraction_limit, airy_diameter
                               reducer_focal_for)
 from core.starfield import (render_starfield, render_exposure_stars,
                             best_focus_offset, _SKY_MAG, _BODY_DEG)
+from core.templates import build_template, TEMPLATES
 
 DEFAULT_FILE = 'run_20260818_213729/ga_elite.txt'
 DEFAULT_IDX = 55
@@ -259,8 +260,19 @@ with st.sidebar:
                         ok, msg = run_control.stop()
                         (st.success if ok else st.warning)(msg)
             with st.expander('📊 运行状态'):
-                _run, _log, _pid = run_control.is_running()
-                st.caption(f'状态: {"⏳ 运行中 (PID " + str(_pid) + ")" if _run else "⏸ 空闲"}')
+                _ri = run_control.get_run_info()
+                st.caption(f'状态: {"⏳ 运行中 (PID " + str(_ri["pid"]) + ")" if _ri["running"] else "⏸ 空闲"}')
+                if _ri['running'] and _ri['started_at'] and _ri['elapsed_s']:
+                    _es = int(_ri['elapsed_s'])
+                    st.caption(f'已运行 {_es // 60} 分 {_es % 60} 秒 | 数据点 {_ri["data_points"]}'
+                               + (f' | best {_ri["latest_best"]:.4f}'
+                                  if _ri['latest_best'] is not None else ''))
+                    _hs = run_control.list_history_csv()
+                    if _hs:
+                        _g_, _b_ = run_control.read_history_csv(_hs[0])
+                        if _g_:
+                            st.line_chart(pd.DataFrame({'gen': _g_, 'best_mfe': _b_})
+                                          .set_index('gen'), height=140)
 
     else:  # 🛠 设计
         with st.expander('🆕 画布管理', expanded=True):
@@ -461,6 +473,42 @@ with tab_work:
                 st.session_state.specs = _apply_stop(_ns)
                 st.session_state.msg = ('ok', f'已从库{ins_lt} 行{ins_row} 插入镜片（面 {int(fpos)} 后）')
             st.session_state.pop('lde_table', None)
+
+    # ---- 📚 镜头样板（经典 / 现代 / 常用构型）----
+    st.divider()
+    with st.expander('📚 镜头样板（经典 / 现代 / 常用构型）'):
+        st.caption('一键载入经典镜头构型：① 镜片库凑（结构近似，每次随机组合，可多点几次换组合）'
+                   '② 完全复刻（样板示例参数，f=100mm 基准自动缩放 + 玻璃自动匹配内置 AGF 表）')
+        k1, k2 = st.columns([2, 1])
+        with k1:
+            _tpl = st.selectbox('构型', list(TEMPLATES.keys()),
+                                format_func=lambda k: TEMPLATES[k]['label'], key='tpl_sel')
+        with k2:
+            _tpl_mode = st.radio('生成模式', ['① 镜片库凑', '② 完全复刻'], horizontal=True,
+                                 key='tpl_mode')
+        st.caption(f'💡 {TEMPLATES[_tpl]["desc"]}')
+        p1, p2, p3 = st.columns(3)
+        with p1:
+            _tpl_f = st.number_input('目标焦距 (mm)', 50.0, 500.0, 200.0, step=10.0, key='tpl_f')
+        with p2:
+            _tpl_bf = st.number_input('后焦 (mm)', 10.0, 120.0, 55.0, step=1.0, key='tpl_bf')
+        with p3:
+            _tpl_epd = st.number_input('口径 EPD (mm)', 10.0, 120.0, 40.0, step=1.0, key='tpl_epd')
+        if st.button('✨ 生成样板镜头（载入主编辑区）', use_container_width=True, key='tpl_go'):
+            _tpl_specs = build_template(_tpl,
+                                        mode='library' if _tpl_mode == '① 镜片库凑' else 'replica',
+                                        f_mm=float(_tpl_f), back_focus=float(_tpl_bf))
+            if _tpl_specs:
+                st.session_state.pop('lde_table', None)
+                st.session_state.pop('bf', None)
+                st.session_state.specs = _apply_stop(_tpl_specs)
+                st.session_state.epd = float(_tpl_epd)
+                st.session_state.src_label = f'样板: {TEMPLATES[_tpl]["label"]}'
+                st.session_state.msg = ('ok', f'已载入样板 {TEMPLATES[_tpl]["label"]}'
+                                       f'（{len(_tpl_specs)} 面 · {_tpl_mode}）——可继续编辑/优化')
+            else:
+                st.session_state.msg = ('err', '样板生成失败——库中无匹配镜片，可切换"② 完全复刻"模式')
+        st.caption('复刻模式参数为经典结构示意值（结构/玻璃类型正确）；载入后用 ⚡ 优化 + 模拟星场验证像质')
 
     # ---- 优化（Zemax Optimize 独立菜单 → 工作区）----
     with st.expander('⚡ 优化（局部）'):
@@ -665,27 +713,46 @@ with tab_cmp:
         st.info('输入精英文件 + 序号（如 55,1,2），点击"载入对比"')
 
 with tab_ga:
-    st.subheader('GA 收敛曲线 + 任务日志')
+    st.subheader('📈 GA 收敛 + 运行状态')
     st.caption('运行中的 GA 每 log_every 代实时写入 ga_history.csv；本区每 5 秒自动刷新。')
 
     @st.fragment(run_every=5)
     def _ga_curve():
-        run, logp, pid = run_control.is_running()
-        st.caption(f'运行状态: {"⏳ 运行中 (PID " + str(pid) + ")" if run else "⏸ 空闲"}')
+        _info = run_control.get_run_info()
+        st.markdown('**⏱ 运行状态**')
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric('状态', '⏳ 运行中' if _info['running'] else '⏸ 空闲')
+        c2.metric('PID', str(_info['pid']) if _info['pid'] else '—')
+        if _info['started_at'] and _info['elapsed_s']:
+            _es = int(_info['elapsed_s'])
+            c3.metric('已运行', f'{_es // 60} 分 {_es % 60} 秒')
+        else:
+            c3.metric('已运行', '—')
+        c4.metric('收敛数据点', str(_info['data_points']))
+        c5.metric('最新 best', f'{_info["latest_best"]:.4f}' if _info['latest_best'] is not None else '—')
+        if _info['gen_str']:
+            st.caption(f'日志进度：第 {_info["gen_str"]} 代（若日志格式支持）')
         hists = run_control.list_history_csv()
         if hists:
-            sel = st.selectbox('收敛曲线（results/…/ga_history.csv）', hists)
+            sel = st.selectbox('收敛曲线（results/…/ga_history.csv）', hists, key='ga_hist_sel')
             res = run_control.read_history_csv(sel)
             if res:
                 g, b = res
-                st.line_chart(pd.DataFrame({'gen': g, 'best_mfe': b}).set_index('gen'),
-                              height=320)
-                st.caption(f'共 {len(g)} 个数据点 | best {b[-1]:.4f}（第 {g[-1]:.0f} 代）')
+                _df = pd.DataFrame({'gen': g, 'best_mfe': b})
+                _df['最优保持'] = _df['best_mfe'].cummin()
+                _df['平滑(5代)'] = _df['best_mfe'].rolling(5, min_periods=1).mean()
+                st.line_chart(_df.set_index('gen'), height=340)
+                st.caption(f'共 {len(g)} 个数据点 | best {b[-1]:.4f}（第 {g[-1]:.0f} 代）'
+                           f' | 相对首代提升 {b[0] / b[-1]:.1f}×'
+                           + (' | ⏳ 仍在运行' if _info['running'] else ''))
+                with st.expander('📋 最近 20 代明细'):
+                    st.dataframe(_df.tail(20).round(4), use_container_width=True,
+                                 hide_index=True)
             else:
                 st.info('该 CSV 暂无数据')
         else:
             st.info('暂无 ga_history.csv——先在侧边栏"🚀 运行"页跑一次 GA（未配置 GA 环境时不可用）')
-        log_path = logp if logp else st.session_state.get('panel_log')
+        log_path = _info['log'] if _info['log'] else st.session_state.get('panel_log')
         if log_path and os.path.exists(log_path):
             with st.expander('任务日志尾部'):
                 st.code(run_control.tail_log(log_path, 100), language='text')

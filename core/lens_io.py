@@ -93,7 +93,7 @@ def elite_to_specs(gene_pairs, airs, back_focus=55.0):
         L = _lib.get_lens(lt, row)
         if L is None:
             return None
-        air_gap = airs[i] if i < 5 else back_focus
+        air_gap = airs[i] if i < len(airs) else back_focus
         if isinstance(L, tuple):
             la, lb = L
             nd_a, vd_a = _agf_params(la['glass'], la['nd'], la['vd'])

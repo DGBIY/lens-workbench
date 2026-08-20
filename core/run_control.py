@@ -226,6 +226,38 @@ def read_history_csv(rel_path):
     return gens, bests
 
 
+def get_run_info():
+    """运行详情 dict：{running, pid, log, started_at, elapsed_s, data_points,
+    latest_best, gen_str, progress}——供运行状态图表化使用"""
+    running, log, pid = is_running()
+    info = {'running': running, 'pid': pid, 'log': log,
+            'started_at': None, 'elapsed_s': None,
+            'data_points': 0, 'latest_best': None, 'gen_str': ''}
+    if running and os.path.exists(LOCK):
+        try:
+            info['started_at'] = os.path.getmtime(LOCK)
+            info['elapsed_s'] = time.time() - info['started_at']
+        except Exception:
+            pass
+    # 进度：日志尾部解析"代数"（多种日志格式兼容）
+    if log and os.path.exists(log):
+        txt = tail_log(log, 300)
+        for pat in (r'第\s*(\d+)\s*代', r'gen\s*[:=]?\s*(\d+)', r'GEN\s*(\d+)',
+                    r'Gen\s*(\d+)', r'generation\s*[:=]?\s*(\d+)'):
+            m = re.search(pat, txt, re.IGNORECASE)
+            if m:
+                info['gen_str'] = m.group(1)
+                break
+    # 收敛数据点
+    hists = list_history_csv()
+    if hists:
+        g, b = read_history_csv(hists[0])
+        if g:
+            info['data_points'] = len(g)
+            info['latest_best'] = float(b[-1])
+    return info
+
+
 if __name__ == '__main__':
     print('is_running:', is_running())
     print('history csv:', list_history_csv())
