@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: 安装依赖
+        run: pip install streamlit optiland numpy pandas matplotlib scipy
+
+      - name: 回归测试（ci_test.py）
+        run: python ci_test.py
+
+      - name: 上传失败诊断（可选）
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-diagnostics
+          path: |
+            ci_test.py
+            app.py
+            core/*.py
+          retention-days: 3
