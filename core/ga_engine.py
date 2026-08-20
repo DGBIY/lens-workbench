@@ -272,7 +272,8 @@ def run_ga_remote(engine='cpu', pop=2000, gens=200, seed=42, target_efl=200.0,
         raise RuntimeError('缺少 ga_workbench.py 或 python_env')
     hist_path = os.path.join(root, 'scripts', f'_wb_hist_{seed}.csv')
     best_out = os.path.join(root, 'scripts', f'_wb_best_{seed}.json')
-    for p in (hist_path, best_out):
+    log_path = os.path.join(root, 'scripts', f'_wb_log_{seed}.txt')
+    for p in (hist_path, best_out, log_path):
         if os.path.exists(p):
             os.remove(p)
     argv = [py, '-u', script, '--pop', str(pop), '--gens', str(gens),
@@ -280,8 +281,10 @@ def run_ga_remote(engine='cpu', pop=2000, gens=200, seed=42, target_efl=200.0,
             '--target-efl', str(target_efl), '--back-focus', str(back_focus),
             '--log-every', str(log_every),
             '--history-out', hist_path, '--best-out', best_out]
-    proc = subprocess.Popen(argv, cwd=root, stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL)
+    # 日志落盘（v0.26.3）：子进程输出不再丢弃，写入 _wb_log_<seed>.txt 供故障诊断
+    log_f = open(log_path, 'w', encoding='utf-8', errors='replace')
+    proc = subprocess.Popen(argv, cwd=root, stdout=log_f,
+                            stderr=subprocess.STDOUT)
     t0 = time.time()
     last_n = 0
     while proc.poll() is None:
@@ -295,10 +298,12 @@ def run_ga_remote(engine='cpu', pop=2000, gens=200, seed=42, target_efl=200.0,
                     progress(int(float(rows[-1][0])), float(rows[-1][1]))
         if timeout and time.time() - t0 > timeout:
             proc.kill()
-            raise TimeoutError(f'GA 超时（>{timeout}s）')
+            log_f.close()
+            raise TimeoutError(f'GA 超时（>{timeout}s）——日志见 {log_path}')
         time.sleep(1.0)
     if proc.returncode != 0 or not os.path.exists(best_out):
-        raise RuntimeError(f'GA 子进程失败（exit={proc.returncode}）')
+        log_f.close()
+        raise RuntimeError(f'GA 子进程失败（exit={proc.returncode}）——日志见 {log_path}')
     with open(best_out, encoding='utf-8') as f:
         d = json.load(f)
     genes = np.array(d['types'] + d['rows'] + d['airs'], dtype=float)
@@ -314,6 +319,7 @@ def run_ga_remote(engine='cpu', pop=2000, gens=200, seed=42, target_efl=200.0,
             os.remove(p)
         except OSError:
             pass
+    log_f.close()   # 日志文件保留（诊断价值），不随临时文件清理
     return genes, hist
 
 
