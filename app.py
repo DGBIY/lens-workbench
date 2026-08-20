@@ -313,6 +313,11 @@ with st.sidebar:
                 _hist = []
                 _bs = None
                 _ga_error = None
+                # 侧边栏路径兜底（v0.30.2）：主工作区的 epd/fields_ui/wavs_ui 在
+                # L471 才赋值，本按钮块在其之前执行——从 session_state 读取 + 默认值
+                _epd = float(st.session_state.get('epd', 40.0))
+                _fields_ui = tuple(st.session_state.get('fields', (0.0, 2.0, 4.06, 5.8)))
+                _wavs_ui = st.session_state.get('wavs') or [(0.48613, 1.0), (0.58756, 1.0), (0.65627, 1.0)]
                 if _ga_eng.startswith('近轴'):
                     if int(_ga_ng) != 6:
                         st.error('近轴引擎固定 6 组基因——其他组数请用"内置 optiland"')
@@ -338,7 +343,7 @@ with st.sidebar:
                             _bi, _bs, _hist = ga_engine.run_ga(
                                 n_groups=int(_ga_ng),
                                 merit=merit_from_preset(_ga_preset, float(_ga_efl)),
-                                epd=epd, fields=fields_ui, wavs=wavs_ui,
+                                epd=_epd, fields=_fields_ui, wavs=_wavs_ui,
                                 pop=int(_ga_pop), gens=int(_ga_gen),
                                 seed_templates=list(_ga_seeds), back_focus=55.0,
                                 progress=_prog)
@@ -356,32 +361,32 @@ with st.sidebar:
                     if _ga_refine:
                         with st.spinner('局部精修（Nelder-Mead 快速）...'):
                             _nr, _hr, _b0, _a0 = optimize_local(
-                                _bs, epd=epd, fields=fields_ui,
-                                wavelengths=wavs_ui, include_rsce=False)
+                                _bs, epd=_epd, fields=_fields_ui,
+                                wavelengths=_wavs_ui, include_rsce=False)
                             if _a0 < _b0:
                                 _bs = _nr
                                 st.caption(f'✅ 精修改善 MFE {_b0:.4f} → {_a0:.4f}')
                     st.session_state.pop('lde_table', None)
                     st.session_state.pop('bf', None)
                     st.session_state.specs = _apply_stop(_bs)
-                    st.session_state.epd = epd
+                    st.session_state.epd = _epd
                     st.session_state.src_label = f'GA best（{_ga_eng.split("（")[0]}）'
                     st.session_state.msg = ('ok', f'GA 完成（best {_hist[-1][1]:.3f}），'
                                            '已自动回填 LDE')
-                    _gm = evaluate_specs(_bs, epd=epd, fields=fields_ui,
-                                         wavelengths=wavs_ui)
+                    _gm = evaluate_specs(_bs, epd=_epd, fields=_fields_ui,
+                                         wavelengths=_wavs_ui)
                     st.success(f'✅ 回填：EFFL {_gm["efl"]:.1f} | AXCL '
                                f'{_gm["axcl"]:+.3f} | RSCE {_gm["rsce_um"]:.0f}µm')
                     with st.spinner('渲染星场验证...'):
-                        _sf = render_starfield(_bs, epd=epd, fields=fields_ui,
-                                               wavelengths=wavs_ui, mode='grid',
+                        _sf = render_starfield(_bs, epd=_epd, fields=_fields_ui,
+                                               wavelengths=_wavs_ui, mode='grid',
                                                n_stars=25, scale=15.0, annotate=True)
                     if _sf is not None:
                         st.pyplot(_sf)
                         st.caption('↑ GA 结果星场验证——不满意可改引擎/预设/种子重跑')
                     with st.spinner('渲染 2D 布局图...'):
                         from core.layout import render_layout
-                        _ly = render_layout(_bs, epd=epd, fields=fields_ui,
+                        _ly = render_layout(_bs, epd=_epd, fields=_fields_ui,
                                             efl=float(_ga_efl))
                     if _ly is not None:
                         st.pyplot(_ly)
