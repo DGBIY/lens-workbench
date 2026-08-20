@@ -187,13 +187,31 @@ def best_focus_offset(specs, epd=40.0, fields=None, wavelengths=None,
     return best[0], curve
 
 
+def _nebula_bg(H, W, seed=5, cx=0.55, cy=0.45):
+    """合成 M42 风格星云背景亮度图（多尺度高斯斑点 + 中心亮核），供曝光模拟用"""
+    rng = np.random.default_rng(seed)
+    yy, xx = np.mgrid[0:H, 0:W]
+    img = np.zeros((H, W))
+    px, py = W * cx, H * cy
+    img += 55.0 * np.exp(-((xx - px) ** 2 + (yy - py) ** 2) / (2 * (W * 0.08) ** 2))
+    for _ in range(16):
+        sx, sy = rng.uniform(0.25, 0.75, 2)
+        ax, ay = rng.uniform(0.03, 0.11, 2)
+        img += rng.uniform(6.0, 26.0) * np.exp(
+            -((xx - sx * W) ** 2 / (2 * (ax * W) ** 2)
+              + (yy - sy * H) ** 2 / (2 * (ay * H) ** 2)))
+    img += 3.0  # 弥散本底
+    return img
+
+
 def render_exposure_stars(specs, epd=40.0, fields=None, wavelengths=None,
                           t_sec=120.0, n_stack=10, sky_mag=21.5, qe=0.6,
                           read_noise=3.0, dark=0.05, n_stars=60, seed=42,
-                          zoom=1, pixel_um=3.76, figsize=(13, 5)):
+                          zoom=1, pixel_um=3.76, target=None, figsize=(13, 5)):
     """像素级曝光模拟照片：单张 vs 叠加 N 张
     - 每颗星：真实追迹 RMS → 高斯 PSF；强度 = 光子统计（star_photons）
     - 噪声：天光背景 + 读出 + 暗电流（单张 σ；叠加 σ/√N）
+    - target: None=纯星空 / 'm42'=合成 M42 猎户座星云（信号叠加）
     zoom: 1=整幅(24×16mm) / 2 / 4（中心放大）
     """
     lens = _build(specs, epd, fields, wavelengths)
@@ -219,6 +237,10 @@ def render_exposure_stars(specs, epd=40.0, fields=None, wavelengths=None,
     ps_as = pixel_scale(f_mm, pixel_um)
     img1 = np.zeros((H, W))
     img2 = np.zeros((H, W))
+    if target == 'm42':
+        _nb = _nebula_bg(H, W)
+        img1 += _nb
+        img2 += _nb
     star_mags_vis = []
     for i in range(n_stars):
         x_mm = (xu[i] - 0.5) * sensor_w
@@ -279,7 +301,8 @@ def render_exposure_stars(specs, epd=40.0, fields=None, wavelengths=None,
         for sp in ax.spines.values():
             sp.set_color('#333333')
     fig.suptitle(f'曝光模拟（口径 {epd:.0f}mm · 天光 {sky_mag:.1f} mag/arcsec^2 · '
-                 f'QE {qe:.0f}% · 显示 {"整幅" if zoom == 1 else f"中心 {zoom}×"}）',
+                 f'QE {qe:.0f}% · 显示 {"整幅" if zoom == 1 else f"中心 {zoom}×"}'
+                 + (' · 目标 M42 猎户座星云（合成）' if target == 'm42' else '') + '）',
                  color='#cccccc', fontsize=12)
     fig.tight_layout(rect=(0, 0, 1, 0.94))
     return fig

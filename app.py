@@ -76,6 +76,7 @@ from core.astro_tools import (pixel_scale, fov, diffraction_limit, airy_diameter
 from core.starfield import (render_starfield, render_exposure_stars,
                             best_focus_offset, _SKY_MAG, _BODY_DEG)
 from core.templates import build_template, TEMPLATES
+from core.merit import PRESETS as MERIT_PRESETS, merit_from_preset
 
 DEFAULT_FILE = 'run_20260818_213729/ga_elite.txt'
 DEFAULT_IDX = 55
@@ -259,6 +260,82 @@ with st.sidebar:
                     if st.button('⏹ 停止', use_container_width=True, key='rc_stop'):
                         ok, msg = run_control.stop()
                         (st.success if ok else st.warning)(msg)
+        with st.expander('🧬 optiland GA（免 Zemax · v0.24）'):
+            st.caption('工作台内置遗传算法：optiland 真实追迹评估（零 Zemax 依赖）。'
+                       '需要 Zemax 引擎请用上方"▶ 任务控制"（引擎开关，可两者并用）')
+            gg1, gg2, gg3 = st.columns(3)
+            with gg1:
+                _ga_ng = st.number_input('镜片组数', 4, 10, 6, step=1, key='ga_ng',
+                                         help='基因长度：N 组镜片 + N-1 空气间隔（推荐 6，可调）')
+                _ga_pop = st.number_input('种群', 8, 60, 16, step=4, key='ga_pop')
+                _ga_gen = st.number_input('代数', 3, 100, 12, step=1, key='ga_gen')
+            with gg2:
+                _ga_preset = st.selectbox('评价函数预设', list(MERIT_PRESETS.keys()),
+                                          key='ga_preset')
+                _ga_efl = st.number_input('目标焦距 (mm)', 50.0, 500.0, 200.0,
+                                          step=10.0, key='ga_efl')
+                _ga_seeds = st.multiselect('模板种子（初始种群·天文模板联动）',
+                                           [k for k in TEMPLATES
+                                            if not TEMPLATES[k].get('reflective')],
+                                           default=['tessar'],
+                                           format_func=lambda k: TEMPLATES[k]['label'],
+                                           key='ga_seeds')
+            with gg3:
+                _ga_mr = st.slider('变异率', 0.05, 0.9, 0.3, 0.05, key='ga_mr')
+                st.caption('预估耗时 ≈ 种群×代数×0.5s（真实追迹）；'
+                           '随机结构偶发追迹挂起会自动超时淘汰')
+            with st.expander('📋 评价函数明细（操作数/目标/权重）'):
+                _gd = pd.DataFrame([{'操作数': op, '目标': t, '权重': w}
+                                    for op, t, w in MERIT_PRESETS[_ga_preset]])
+                st.dataframe(_gd, use_container_width=True, hide_index=True)
+                st.caption('MFE = √(Σw·Δ²/Σw)（Zemax 惯例）；12 种操作数可换预设，'
+                           '或改权重/目标后重跑')
+            if st.button('▶ 启动 optiland GA（跑完自动回填 LDE + 星场验证）',
+                         use_container_width=True, key='ga_go'):
+                from core import ga_engine
+                _bar = st.progress(0.0, text='GA 进化中...')
+
+                def _prog(g, f):
+                    _bar.progress(min(1.0, g / max(1, int(_ga_gen))),
+                                  text=f'第 {g}/{int(_ga_gen)} 代 · best {f:.3f}')
+
+                with st.spinner('optiland GA 运行中（约 30-120s）...'):
+                    _bi, _bs, _hist = ga_engine.run_ga(
+                        n_groups=int(_ga_ng),
+                        merit=merit_from_preset(_ga_preset, float(_ga_efl)),
+                        epd=epd, fields=fields_ui, wavs=wavs_ui,
+                        pop=int(_ga_pop), gens=int(_ga_gen),
+                        seed_templates=list(_ga_seeds), back_focus=55.0,
+                        progress=_prog)
+                _bar.progress(1.0, text='完成')
+                if _bs:
+                    st.session_state.pop('lde_table', None)
+                    st.session_state.pop('bf', None)
+                    st.session_state.specs = _apply_stop(_bs)
+                    st.session_state.epd = epd
+                    st.session_state.src_label = (f'GA best（{int(_ga_gen)} 代 · '
+                                                  f'{_ga_preset}）')
+                    st.session_state.msg = ('ok', f'GA 完成：best MFE {_hist[-1][1]:.3f}，'
+                                           '已自动回填 LDE')
+                    _gm = evaluate_specs(_bs, epd=epd, fields=fields_ui,
+                                         wavelengths=wavs_ui)
+                    st.success(f'✅ 回填：EFFL {_gm["efl"]:.1f} | AXCL '
+                               f'{_gm["axcl"]:+.3f} | RSCE {_gm["rsce_um"]:.0f}µm'
+                               f' | MFE {_hist[-1][1]:.3f}')
+                    with st.spinner('渲染星场验证...'):
+                        _sf = render_starfield(_bs, epd=epd, fields=fields_ui,
+                                               wavelengths=wavs_ui, mode='grid',
+                                               n_stars=25, scale=15.0, annotate=True)
+                    if _sf is not None:
+                        st.pyplot(_sf)
+                        st.caption('↑ GA 结果星场验证——中心圆点/边缘彗差一目了然，'
+                                   '不满意可改预设/种子重跑')
+                    st.line_chart(pd.DataFrame(
+                        {'gen': [h[0] for h in _hist],
+                         'best_mfe': [h[1] for h in _hist]}).set_index('gen'))
+                else:
+                    st.error('GA 失败（无有效个体）——检查镜片库或减小组数')
+
             with st.expander('📊 运行状态'):
                 _ri = run_control.get_run_info()
                 st.caption(f'状态: {"⏳ 运行中 (PID " + str(_ri["pid"]) + ")" if _ri["running"] else "⏸ 空闲"}')
@@ -1013,14 +1090,18 @@ with tab_astro:
         with x3:
             _ex_zoom = st.radio('显示区域', ['整幅', '中心 3×'], horizontal=True, key='astro_exzoom')
             _ex_seed = st.number_input('随机种子', 1, 999, 3, key='astro_exseed')
-        _ex_key = (('exposure', _ex_t, _ex_n, _ex_sky, _ex_qe, _ex_zoom, _ex_seed) + _skey)
+        _ex_tgt = st.radio('天空目标', ['纯星空', 'M42 猎户座星云（合成）'],
+                           horizontal=True, key='astro_extgt')
+        _ex_key = (('exposure', _ex_t, _ex_n, _ex_sky, _ex_qe, _ex_zoom, _ex_seed,
+                    _ex_tgt) + _skey)
         with st.spinner('模拟曝光渲染中（约 2-4s）...'):
             _exfig = _cache_fig(_ex_key, lambda: render_exposure_stars(
                 specs, epd=epd, fields=fields_ui, wavelengths=wavs_ui,
                 t_sec=float(_ex_t), n_stack=int(_ex_n),
                 sky_mag=_SKY_MAG[_ex_sky], qe=float(_ex_qe),
                 n_stars=80, seed=int(_ex_seed),
-                zoom=3 if _ex_zoom == '中心 3×' else 1))
+                zoom=3 if _ex_zoom == '中心 3×' else 1,
+                target='m42' if _ex_tgt == 'M42 猎户座星云（合成）' else None))
         if _exfig is not None:
             _dl_png(_exfig, '下载曝光模拟', 'exposure.png')
             st.pyplot(_exfig)
