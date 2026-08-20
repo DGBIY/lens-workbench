@@ -56,7 +56,7 @@ def _random_lens(rng, min_diam, lt_hint=None):
 def random_individual(rng, n_groups):
     pairs = []
     for i in range(n_groups):
-        m = _random_lens(rng, POS_DIAM_MIN[i])
+        m = _random_lens(rng, POS_DIAM_MIN[min(i, len(POS_DIAM_MIN) - 1)])  # MiMo 审核：索引保护
         if m is None:
             return None
         pairs.append(m)
@@ -76,7 +76,7 @@ def seed_from_template(key, rng, n_groups):
             return None
         pairs.append(m)
     while len(pairs) < n_groups:
-        m = _random_lens(rng, POS_DIAM_MIN[len(pairs)])
+        m = _random_lens(rng, POS_DIAM_MIN[min(len(pairs), len(POS_DIAM_MIN) - 1)])  # MiMo 审核：索引保护
         if m is None:
             return None
         pairs.append(m)
@@ -219,8 +219,9 @@ def run_ga_remote(engine='cpu', pop=2000, gens=200, seed=42, target_efl=200.0,
     last_n = 0
     while proc.poll() is None:
         if os.path.exists(hist_path):
-            rows = [l.strip().split(',') for l in open(hist_path, encoding='utf-8')
-                    if l.strip() and not l.startswith('gen')]
+            with open(hist_path, encoding='utf-8') as _fh:
+                rows = [l.strip().split(',') for l in _fh
+                        if l.strip() and not l.startswith('gen')]
             if len(rows) > last_n:
                 last_n = len(rows)
                 if progress:
@@ -236,8 +237,9 @@ def run_ga_remote(engine='cpu', pop=2000, gens=200, seed=42, target_efl=200.0,
     genes = np.array(d['types'] + d['rows'] + d['airs'], dtype=float)
     hist = []
     if os.path.exists(hist_path):
-        rows = [l.strip().split(',') for l in open(hist_path, encoding='utf-8')
-                if l.strip() and not l.startswith('gen')]
+        with open(hist_path, encoding='utf-8') as _fh:
+            rows = [l.strip().split(',') for l in _fh
+                    if l.strip() and not l.startswith('gen')]
         hist = [(int(float(r[0])), float(r[1])) for r in rows]
     # MiMo 审核 #10：正常路径清理临时文件（异常残留由下次启动的 os.remove 兜底）
     for p in (hist_path, best_out):
